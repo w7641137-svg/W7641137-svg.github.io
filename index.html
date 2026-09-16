@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#000000" />
+  <title>Гёте — AR-портрет</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:Georgia,serif}
+    #boot{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:#000;transition:opacity .45s ease}
+    #spinner{width:34px;height:34px;border:2px solid rgba(255,255,255,.15);border-top-color:rgba(255,255,255,.75);border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .mindar-ui-overlay{display:none!important}
+  </style>
+  <script src="https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/dist/mindar-image.prod.js"></script>
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+</head>
+<body>
+  <div id="boot"><div id="spinner"></div></div>
+  <img id="compileTarget" src="./goethe_target.jpg" hidden crossorigin="anonymous" />
+
+<script>
+(async()=>{
+  const boot=document.getElementById('boot');
+  const targetImg=document.getElementById('compileTarget');
+  const waitImage=()=>new Promise((res,rej)=>{ if(targetImg.complete&&targetImg.naturalWidth) return res(); targetImg.onload=res; targetImg.onerror=rej; });
+  await waitImage();
+
+  // For the prototype we compile the target once in the browser and cache it.
+  // The production book will use precompiled target libraries for instant startup.
+  const dbOpen=()=>new Promise((resolve,reject)=>{
+    const req=indexedDB.open('wolfson-ar',1);
+    req.onupgradeneeded=()=>req.result.createObjectStore('targets');
+    req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
+  });
+  const dbGet=(db,key)=>new Promise((resolve,reject)=>{const tx=db.transaction('targets','readonly');const r=tx.objectStore('targets').get(key);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>reject(r.error)});
+  const dbPut=(db,key,val)=>new Promise((resolve,reject)=>{const tx=db.transaction('targets','readwrite');const r=tx.objectStore('targets').put(val,key);r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error)});
+
+  let buffer=null;
+  try{
+    const db=await dbOpen();
+    buffer=await dbGet(db,'goethe-v1');
+    if(!buffer){
+      const Compiler = window.MINDAR?.IMAGE?.Compiler || window.MINDAR?.Compiler;
+      if(!Compiler) throw new Error('MindAR Compiler unavailable');
+      const compiler=new Compiler();
+      await compiler.compileImageTargets([targetImg],()=>{});
+      buffer=await compiler.exportData();
+      await dbPut(db,'goethe-v1',buffer);
+    }
+  }catch(e){
+    console.error(e);
+    const Compiler = window.MINDAR?.IMAGE?.Compiler || window.MINDAR?.Compiler;
+    const compiler=new Compiler();
+    await compiler.compileImageTargets([targetImg],()=>{});
+    buffer=await compiler.exportData();
+  }
+
+  const targetURL=URL.createObjectURL(new Blob([buffer],{type:'application/octet-stream'}));
+
+  // Custom appearance: soft rise, then almost imperceptible "breathing".
+  AFRAME.registerComponent('wolfson-portrait',{
+    init:function(){
+      this.p=this.el.querySelector('#portraitPlane');
+      this.a=this.el.querySelector('#auraPlane');
+      const show=()=>{
+        this.p.setAttribute('visible',true); this.a.setAttribute('visible',true);
+        this.p.setAttribute('material','opacity',0);
+        this.a.setAttribute('material','opacity',0);
+        this.p.setAttribute('scale','0.93 0.93 0.93');
+        this.p.setAttribute('position','0 0.02 0.025');
+        this.p.setAttribute('animation__fade','property: material.opacity; from: 0; to: 1; dur: 900; easing: easeOutQuad');
+        this.a.setAttribute('animation__fade','property: material.opacity; from: 0; to: 0.18; dur: 1100; easing: easeOutQuad');
+        this.p.setAttribute('animation__rise','property: position; from: 0 0.02 0.025; to: 0 0.14 0.09; dur: 1050; easing: easeOutCubic');
+        this.a.setAttribute('animation__rise','property: position; from: 0 0.00 0.012; to: 0 0.13 0.055; dur: 1250; easing: easeOutCubic');
+        setTimeout(()=>{
+          this.p.setAttribute('animation__breathe','property: scale; from: 1 1 1; to: 1.014 1.014 1.014; dur: 3000; dir: alternate; loop: true; easing: easeInOutSine');
+          this.p.setAttribute('animation__float','property: position; from: 0 0.14 0.09; to: 0 0.155 0.095; dur: 3300; dir: alternate; loop: true; easing: easeInOutSine');
+        },1100);
+      };
+      const hide=()=>{
+        this.p.removeAttribute('animation__breathe'); this.p.removeAttribute('animation__float');
+        this.p.setAttribute('animation__out','property: material.opacity; to: 0; dur: 280; easing: easeInQuad');
+        this.a.setAttribute('animation__out','property: material.opacity; to: 0; dur: 280; easing: easeInQuad');
+      };
+      this.el.addEventListener('targetFound',show);
+      this.el.addEventListener('targetLost',hide);
+    }
+  });
+
+  const scene=document.createElement('a-scene');
+  scene.setAttribute('mindar-image',`imageTargetSrc: ${targetURL}; autoStart: true; uiLoading: no; uiScanning: no; uiError: yes; warmupTolerance: 6; missTolerance: 7;`);
+  scene.setAttribute('embedded','');
+  scene.setAttribute('color-space','sRGB');
+  scene.setAttribute('renderer','colorManagement: true; physicallyCorrectLights: true; alpha: true; antialias: true');
+  scene.setAttribute('vr-mode-ui','enabled: false');
+  scene.setAttribute('device-orientation-permission-ui','enabled: false');
+  scene.innerHTML=`
+    <a-assets>
+      <img id="portraitAsset" src="./goethe_portrait.png" crossorigin="anonymous" />
+    </a-assets>
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+    <a-entity id="target" mindar-image-target="targetIndex: 0" wolfson-portrait>
+      <a-plane id="auraPlane" src="#portraitAsset" visible="false"
+        material="transparent: true; opacity: 0; alphaTest: 0.01; depthWrite: false; blending: additive"
+        position="0 0.13 0.055" width="0.78" height="1.02" rotation="-6 0 0" scale="1.06 1.06 1.06"></a-plane>
+      <a-plane id="portraitPlane" src="#portraitAsset" visible="false"
+        material="transparent: true; opacity: 0; alphaTest: 0.02; depthWrite: false"
+        position="0 0.14 0.09" width="0.70" height="0.91" rotation="-7 0 0"></a-plane>
+    </a-entity>`;
+  document.body.appendChild(scene);
+  scene.addEventListener('arReady',()=>{ boot.style.opacity='0'; setTimeout(()=>boot.remove(),500); });
+  scene.addEventListener('arError',()=>{ boot.style.opacity='0'; });
+})();
+</script>
+</body>
+</html>
