@@ -10,75 +10,48 @@
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    html,body{
-      margin:0;
-      width:100%;
-      height:100%;
-      overflow:hidden;
-      background:#000;
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
     }
-    a-scene{
-      position:fixed!important;
-      inset:0!important;
+
+    a-scene {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 1;
+    }
+
+    #portraitOverlay {
+      position: fixed;
+      left: 50%;
+      top: 46%;
+      width: min(62vw, 390px);
+      max-height: 72vh;
+      object-fit: contain;
+      transform: translate(-50%, -46%) scale(0.965);
+      opacity: 0;
+      z-index: 20;
+      pointer-events: none;
+      transition:
+        opacity 650ms ease,
+        transform 850ms cubic-bezier(.2,.8,.2,1);
+      will-change: opacity, transform;
+    }
+
+    #portraitOverlay.visible {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
     }
   </style>
-
-  <script>
-    AFRAME.registerComponent('wolfson-portrait', {
-      init: function () {
-        const p = this.el.querySelector('#portrait');
-        let shown = false;
-
-        const show = () => {
-          if (shown) return;
-          shown = true;
-
-          p.setAttribute('visible', true);
-          p.setAttribute('material', 'opacity', 0);
-          p.setAttribute('scale', '0.965 0.965 0.965');
-          p.setAttribute('position', '0 0.10 0.10');
-
-          p.setAttribute(
-            'animation__fade',
-            'property: material.opacity; from: 0; to: 1; dur: 650; easing: easeOutQuad'
-          );
-
-          p.setAttribute(
-            'animation__rise',
-            'property: position; from: 0 0.10 0.10; to: 0 0.145 0.10; dur: 800; easing: easeOutCubic'
-          );
-
-          setTimeout(() => {
-            if (!shown) return;
-            p.setAttribute(
-              'animation__breathe',
-              'property: scale; from: 1 1 1; to: 1.006 1.006 1.006; dur: 4200; dir: alternate; loop: true; easing: easeInOutSine'
-            );
-          }, 850);
-        };
-
-        const hide = () => {
-          shown = false;
-          p.removeAttribute('animation__breathe');
-
-          p.setAttribute(
-            'animation__fadeout',
-            'property: material.opacity; to: 0; dur: 500; easing: easeInQuad'
-          );
-
-          setTimeout(() => {
-            if (!shown) p.setAttribute('visible', false);
-          }, 520);
-        };
-
-        this.el.addEventListener('targetFound', show);
-        this.el.addEventListener('targetLost', hide);
-      }
-    });
-  </script>
 </head>
 
 <body>
+
+  <img id="portraitOverlay" src="./goethe_portrait.png" alt="">
+
   <a-scene
     mindar-image="
       imageTargetSrc: ./targets.mind;
@@ -86,32 +59,52 @@
       uiLoading: yes;
       uiScanning: no;
       uiError: yes;
-      warmupTolerance: 3;
-      missTolerance: 35;
+      warmupTolerance: 2;
+      missTolerance: 18;
+      filterMinCF: 0.0005;
+      filterBeta: 800;
     "
     color-space="sRGB"
-    renderer="colorManagement: true; physicallyCorrectLights: true; alpha: true; antialias: true"
+    renderer="colorManagement: true; alpha: true; antialias: true"
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false">
 
-    <a-assets>
-      <img id="portraitAsset" src="./goethe_portrait.png" crossorigin="anonymous">
-    </a-assets>
-
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-    <a-entity mindar-image-target="targetIndex: 0" wolfson-portrait>
-      <a-plane id="portrait"
-        src="#portraitAsset"
-        visible="false"
-        position="0 0.145 0.10"
-        width="0.72"
-        height="0.90"
-        rotation="-6 0 0"
-        material="transparent: true; opacity: 0; alphaTest: 0.01; depthWrite: false">
-      </a-plane>
-    </a-entity>
+    <!-- Маркер нужен только для распознавания. Портрет к его наклону НЕ привязан. -->
+    <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
 
   </a-scene>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const target = document.getElementById('goetheTarget');
+      const portrait = document.getElementById('portraitOverlay');
+
+      let hideTimer = null;
+
+      const showPortrait = () => {
+        if (hideTimer) {
+          clearTimeout(hideTimer);
+          hideTimer = null;
+        }
+        portrait.classList.add('visible');
+      };
+
+      const scheduleHide = () => {
+        if (hideTimer) clearTimeout(hideTimer);
+
+        // Даже если трекинг на мгновение сорвался, портрет остаётся.
+        hideTimer = setTimeout(() => {
+          portrait.classList.remove('visible');
+          hideTimer = null;
+        }, 1400);
+      };
+
+      target.addEventListener('targetFound', showPortrait);
+      target.addEventListener('targetLost', scheduleHide);
+    });
+  </script>
+
 </body>
 </html>
