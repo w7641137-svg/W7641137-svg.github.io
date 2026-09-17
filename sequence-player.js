@@ -1,90 +1,107 @@
 (function(global){
-  'use strict';
+  "use strict";
+
   const sleep = ms => new Promise(r=>setTimeout(r,ms));
-  const rand=(a,b)=>a+Math.random()*(b-a);
+  const rand = (a,b) => a + Math.random()*(b-a);
+  const easeInOut = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
+  const easeUp = t => -(Math.cos(Math.PI*t)-1)/2;
 
-  function createSequencePlayer({mount}){
-    let hero=null, imgs=[], loaded=false, running=false, token=0;
-    let layer=null;
+  function createCanvasSequencePlayer({canvas}){
+    const ctx = canvas.getContext("2d", {alpha:true, desynchronized:true});
+    let hero=null, imgs=[], loaded=false, running=false, token=0, current=-1;
 
-    async function load(spec){
-      destroy(); hero=spec; loaded=false;
-      layer=document.createElement('div');
-      layer.className='sequence-layer';
-      layer.style.cssText='position:absolute;inset:0;pointer-events:none;';
-      mount.appendChild(layer);
-      imgs=[];
-      for(const url of spec.frames){
-        const img=new Image();
-        img.decoding='async'; img.alt=''; img.src=url;
-        img.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;will-change:opacity;user-select:none;-webkit-user-drag:none;';
-        layer.appendChild(img); imgs.push(img);
+    function drawFrame(i){
+      if(!imgs.length) return;
+      i=Math.max(0,Math.min(imgs.length-1,i));
+      if(i===current) return;
+      const im=imgs[i];
+      if(canvas.width!==im.naturalWidth || canvas.height!==im.naturalHeight){
+        canvas.width=im.naturalWidth;
+        canvas.height=im.naturalHeight;
       }
-      await Promise.all(imgs.map(img=>img.decode ? img.decode().catch(()=>{}) : new Promise(r=>{img.onload=img.onerror=r;})));
-      loaded=true; reset(); return true;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(im,0,0,canvas.width,canvas.height);
+      current=i;
     }
 
-    function reset(){ if(!imgs.length)return; imgs.forEach((im,i)=>im.style.opacity=i===0?'1':'0'); }
+    async function load(spec){
+      stop(); hero=spec; imgs=[]; loaded=false; current=-1;
+      for(const url of spec.frames){
+        const im=new Image();
+        im.decoding="async";
+        im.src=url;
+        imgs.push(im);
+      }
+      await Promise.all(imgs.map(im => im.decode ? im.decode() : new Promise((res,rej)=>{im.onload=res; im.onerror=rej;})));
+      loaded=true;
+      drawFrame(0);
+      return true;
+    }
 
-    function crossfade(a,b,ms,myToken){
+    function animate(forward,duration,myToken,ease){
       return new Promise(resolve=>{
-        if(myToken!==token)return resolve(false);
-        const from=imgs[a], to=imgs[b];
-        if(!from||!to)return resolve(false);
-        to.style.transition='none'; to.style.opacity='0';
-        from.style.transition='none'; from.style.opacity='1';
-        void to.offsetWidth;
-        const easing='cubic-bezier(.35,0,.22,1)';
-        to.style.transition=`opacity ${ms}ms ${easing}`;
-        from.style.transition=`opacity ${ms}ms ${easing}`;
-        to.style.opacity='1'; from.style.opacity='0';
-        const t=setTimeout(()=>resolve(myToken===token),ms+24);
+        const start=performance.now();
+        function step(now){
+          if(myToken!==token || !running) return resolve(false);
+          const t=Math.min(1,(now-start)/duration);
+          const e=ease(t);
+          const pos=e*(imgs.length-1);
+          const idx=forward ? Math.round(pos) : (imgs.length-1-Math.round(pos));
+          drawFrame(idx);
+          if(t<1) requestAnimationFrame(step);
+          else resolve(true);
+        }
+        requestAnimationFrame(step);
       });
     }
 
-    async function gesture(myToken){
-      // Deliberately slow, museum-like nod. Full pre-rendered frames only.
-      const ms=[340,350,370,390,430,140,300,420,460];
-      for(let i=0;i<9;i++){
-        if(!(await crossfade(i,i+1,ms[i],myToken)))return false;
-        if(i===4) await sleep(180);   // bottom point before blink frame
-        if(i===5) await sleep(120);   // blink is brief
-        if(myToken!==token)return false;
-      }
-      await sleep(180);
-      if(myToken!==token)return false;
-      await crossfade(9,0,480,myToken);
-      reset(); return true;
+    async function nod(myToken){
+      // В каждый момент на canvas существует ровно ОДИН кадр.
+      // Никаких crossfade, opacity-слоёв и второй головы под ним.
+      drawFrame(0);
+      if(!(await animate(true,hero.timing.down,myToken,easeInOut))) return;
+      await sleep(hero.timing.hold||300);
+      if(myToken!==token || !running) return;
+      await animate(false,hero.timing.up,myToken,easeUp);
+      drawFrame(0);
     }
 
     async function loop(myToken){
-      await sleep(hero.restBefore||1800);
+      await sleep(hero.timing.rest||1800);
       while(running && myToken===token){
-        await gesture(myToken);
-        if(!running||myToken!==token)return;
-        const g=hero.gap||[14000,19000];
+        await nod(myToken);
+        if(!running || myToken!==token) return;
+        const g=hero.timing.gap||[14000,19000];
         await sleep(rand(g[0],g[1]));
       }
     }
 
     function start(){
-      if(!loaded||running)return;
-      running=true; token++; const t=token;
-      if(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches){reset();return;}
+      if(!loaded || running) return;
+      running=true; token++;
+      const t=token;
+      drawFrame(0);
+      if(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       loop(t);
     }
-    function stop(){running=false;token++;reset();}
-    function destroy(){
-      running=false;token++;loaded=false;
-      if(layer){layer.remove();layer=null;}
-      imgs.forEach(i=>{i.src='';}); imgs=[]; hero=null;
+
+    function stop(){
+      running=false; token++; drawFrame(0);
     }
+
+    function destroy(){
+      stop(); loaded=false; hero=null;
+      imgs.forEach(im=>{try{im.src=""}catch(e){}}); imgs=[];
+      ctx.clearRect(0,0,canvas.width,canvas.height); current=-1;
+    }
+
     document.addEventListener('visibilitychange',()=>{
-      if(!running)return;
-      token++; reset();
-      if(!document.hidden){const t=token;loop(t);}
+      if(document.hidden && running){ token++; drawFrame(0); }
+      else if(!document.hidden && running){ token++; loop(token); }
     });
-    return {load,start,stop,destroy,get isLoaded(){return loaded;},get heroId(){return hero&&hero.id;}};
+
+    return {load,start,stop,destroy,get isLoaded(){return loaded;}};
   }
-  global.createSequencePlayer=createSequencePlayer;
+
+  global.createCanvasSequencePlayer=createCanvasSequencePlayer;
 })(window);
