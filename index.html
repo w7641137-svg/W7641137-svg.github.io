@@ -60,12 +60,72 @@
       position:absolute;inset:0;z-index:2;transform-origin:50% 69%;transform-style:preserve-3d;
       will-change:transform;backface-visibility:hidden
     }
+    #goetheHeadWrap.nod{animation:courteousNod 6.4s cubic-bezier(.36,0,.20,1) 1}
+    @keyframes courteousNod{
+      0%,15%,100%{transform:translateY(0) rotateX(0deg) scaleY(1)}
+      38%{transform:translateY(2px) rotateX(3deg) scaleY(.992)}
+      55%,66%{transform:translateY(5px) rotateX(7.2deg) scaleY(.972)}
+      83%{transform:translateY(2px) rotateX(3deg) scaleY(.992)}
+    }
     #goetheEyesClosed{
       position:absolute;left:32.5%;top:20%;width:35%;height:16%;z-index:5;opacity:0;object-fit:fill!important;
       transition:opacity .065s linear
     }
     #goetheHeadWrap.blink #goetheEyesClosed{opacity:1}
-  </style>
+  
+    /* V4: rigid cropped head. No scaleY, no downward squeeze, collar stays on torso. */
+    #headWrap {
+      position:absolute !important;
+      left:20.1667% !important;
+      top:2.9333% !important;
+      width:58.1667% !important;
+      height:54.4000% !important;
+      inset:auto !important;
+      z-index:2;
+      transform-origin:50% 94% !important;
+      transform-style:preserve-3d;
+      will-change:transform;
+      backface-visibility:hidden;
+    }
+
+    #headOpen {
+      position:absolute !important;
+      inset:0 !important;
+      width:100% !important;
+      height:100% !important;
+      object-fit:contain !important;
+    }
+
+    #eyesClosed {
+      position:absolute !important;
+      left:24.0688% !important;
+      top:37.5000% !important;
+      width:55.3009% !important;
+      height:20.8333% !important;
+      inset:auto !important;
+      object-fit:fill !important;
+    }
+
+    #headWrap.nod {
+      animation:rigidCourteousNod 6.2s cubic-bezier(.34,0,.18,1) 1 !important;
+    }
+
+    @keyframes rigidCourteousNod {
+      0%, 18%, 100% {
+        transform:perspective(1600px) rotateX(0deg) translateY(0);
+      }
+      42% {
+        transform:perspective(1600px) rotateX(3.2deg) translateY(.5px);
+      }
+      58%, 68% {
+        transform:perspective(1600px) rotateX(6.2deg) translateY(1px);
+      }
+      84% {
+        transform:perspective(1600px) rotateX(3.0deg) translateY(.5px);
+      }
+    }
+
+</style>
 </head>
 <body>
   <div id="arRoot"></div>
@@ -92,10 +152,10 @@
   <!-- Только PNG. Никаких picture/WebP на стадии пилота: меньше точек отказа. -->
   <div id="portrait-goethe" class="portrait" aria-hidden="true">
     <div class="portrait-stage">
-      <img id="goetheTorso" src="./goethe_torso.png?v=3" alt="">
+      <img id="goetheTorso" src="./goethe_body_v4.png?v=4" alt="">
       <div id="goetheHeadWrap">
-        <img id="goetheHeadOpen" src="./goethe_head_open.png?v=3" alt="">
-        <img id="goetheEyesClosed" src="./goethe_eyes_closed.png?v=3" alt="">
+        <img id="goetheHeadOpen" src="./goethe_head_v4.png?v=4" alt="">
+        <img id="goetheEyesClosed" src="./goethe_eyes_v4.png?v=4" alt="">
       </div>
     </div>
   </div>
@@ -104,7 +164,7 @@
   (()=>{
     "use strict";
 
-    const VERSION="v3-visible-nod-20260917";
+    const VERSION="v4-rigid-head-20260917";
     const launchPanel=document.getElementById("launchPanel");
     const errorPanel=document.getElementById("errorPanel");
     const startButton=document.getElementById("startButton");
@@ -142,9 +202,9 @@
 
     async function preflightAssets(){
       const assets=[
-        "./goethe_torso.png?v=3",
-        "./goethe_head_open.png?v=3",
-        "./goethe_eyes_closed.png?v=3"
+        "./goethe_body_v4.png?v=4",
+        "./goethe_head_v4.png?v=4",
+        "./goethe_eyes_v4.png?v=4"
       ];
       await Promise.all(assets.map(loadImage));
     }
@@ -159,7 +219,7 @@
       const root=document.getElementById("arRoot");
       root.innerHTML=`
         <a-scene id="scene"
-          mindar-image="imageTargetSrc: ./targets.mind?v=3; autoStart: false; maxTrack: 1; uiLoading: no; uiScanning: no; uiError: no; warmupTolerance: 2; missTolerance: 24; filterMinCF: 0.0005; filterBeta: 800;"
+          mindar-image="imageTargetSrc: ./targets.mind?v=4; autoStart: false; maxTrack: 1; uiLoading: no; uiScanning: no; uiError: no; warmupTolerance: 2; missTolerance: 24; filterMinCF: 0.0005; filterBeta: 800;"
           color-space="sRGB"
           renderer="colorManagement: true; alpha: true; antialias: true"
           vr-mode-ui="enabled:false"
@@ -231,64 +291,21 @@
       setTimeout(()=>head.classList.remove("blink"),145);
     }
 
-    let nodAnimation=null;
-
     function nod(){
       if(!active)return;
 
-      if(nodAnimation){
-        try{nodAnimation.cancel()}catch(e){}
-        nodAnimation=null;
-      }
-
       /*
-        V3: настоящий, ВИДИМЫЙ учтивый поклон.
-        Используем Web Animations API вместо CSS-класса:
-        Safari получает transform напрямую на слой головы.
-        Pivot находится у основания шеи.
+        V4: rigid-head nod.
+        No scaleY. No 10px downward shift. No shoulder squeeze.
+        Collar/cravat belong to torso and do not move.
       */
-      head.style.transformOrigin="50% 68%";
+      head.classList.remove("nod");
+      void head.offsetWidth;
+      head.classList.add("nod");
 
-      nodAnimation=head.animate([
-        {
-          transform:"perspective(720px) translateY(0px) rotateX(0deg) scaleX(1) scaleY(1)",
-          offset:0
-        },
-        {
-          transform:"perspective(720px) translateY(0px) rotateX(0deg) scaleX(1) scaleY(1)",
-          offset:.18
-        },
-        {
-          transform:"perspective(720px) translateY(5px) rotateX(6deg) scaleX(1.006) scaleY(.976)",
-          offset:.40
-        },
-        {
-          transform:"perspective(720px) translateY(11px) rotateX(12.5deg) scaleX(1.012) scaleY(.935)",
-          offset:.58
-        },
-        {
-          transform:"perspective(720px) translateY(11px) rotateX(12.5deg) scaleX(1.012) scaleY(.935)",
-          offset:.68
-        },
-        {
-          transform:"perspective(720px) translateY(5px) rotateX(6deg) scaleX(1.006) scaleY(.976)",
-          offset:.84
-        },
-        {
-          transform:"perspective(720px) translateY(0px) rotateX(0deg) scaleX(1) scaleY(1)",
-          offset:1
-        }
-      ],{
-        duration:6200,
-        easing:"cubic-bezier(.34,0,.18,1)",
-        fill:"none"
-      });
-
-      // Один спокойный моргательный жест в нижней точке поклона.
-      setTimeout(()=>{if(active)blink()},3850);
-
-      nodAnimation.onfinish=()=>{nodAnimation=null};
-      nodAnimation.oncancel=()=>{nodAnimation=null};
+      // One quiet blink close to the lower point.
+      setTimeout(()=>{if(active)blink()},3650);
+      setTimeout(()=>head.classList.remove("nod"),6250);
     }
 
     function scheduleNod(first=false){
@@ -324,7 +341,7 @@
       lossTimer=setTimeout(()=>{
         active=false;
         clearTimeout(nodTimer);clearTimeout(blinkTimer);
-        head.classList.remove("blink"); if(nodAnimation){try{nodAnimation.cancel()}catch(e){} nodAnimation=null;} head.style.transform="";
+        head.classList.remove("nod","blink");
         portrait.classList.remove("visible");
         resetScale();
         lossTimer=null;
