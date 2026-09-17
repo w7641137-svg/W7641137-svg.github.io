@@ -24,14 +24,14 @@
       z-index: 1;
     }
 
-    #portraitWrap {
+    #portraitCanvas {
       --ar-scale: 1;
       position: fixed;
       left: 50%;
       top: 48%;
       width: min(62vw, 390px);
-      max-width: 390px;
-      aspect-ratio: 561 / 701;
+      height: auto;
+      aspect-ratio: 4 / 5;
       opacity: 0;
       z-index: 20;
       pointer-events: none;
@@ -43,37 +43,19 @@
       will-change: opacity, transform;
     }
 
-    #portraitWrap.visible {
+    #portraitCanvas.visible {
       opacity: 1;
       transform: translate(-50%, -50%) scale(var(--ar-scale));
     }
-
-    #portraitWrap img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      opacity: 0;
-      transition: opacity 1150ms ease-in-out;
-      will-change: opacity;
-      user-select: none;
-      -webkit-user-drag: none;
-    }
-
-    #portraitWrap img.active {
-      opacity: 1;
-    }
   </style>
 </head>
+
 <body>
 
-  <div id="portraitWrap" aria-hidden="true">
-    <img id="imgA" src="./goethe_frame1.png" alt="">
-    <img id="imgB" src="./goethe_frame1.png" alt="">
-  </div>
+  <canvas id="portraitCanvas" width="360" height="450"></canvas>
 
   <a-scene
+    id="scene"
     mindar-image="
       imageTargetSrc: ./targets.mind;
       autoStart: true;
@@ -92,95 +74,113 @@
 
     <a-camera id="arCamera" position="0 0 0" look-controls="enabled: false"></a-camera>
 
-    <!-- Маркер даёт только факт распознавания и расстояние.
-         Его наклон и дрожание портрету не передаются. -->
+    <!-- Страница только распознаётся.
+         Её наклон и дрожание портрету не передаются. -->
     <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
 
   </a-scene>
 
   <script>
     window.addEventListener('DOMContentLoaded', () => {
-      const framePaths = [
-        './goethe_frame1.png',
-        './goethe_frame2.png',
-        './goethe_frame3.png',
-        './goethe_frame4.png'
-      ];
-
-      framePaths.forEach(src => {
-        const i = new Image();
-        i.src = src;
-      });
-
-      // Спокойный цикл туда и обратно — без резкого прыжка 4 -> 1.
-      const sequence = [0, 1, 2, 3, 2, 1];
-      const stepDuration = 1550; // время между фазами, мс
-
+      const sceneEl = document.getElementById('scene');
       const target = document.getElementById('goetheTarget');
-      const cameraEl = document.getElementById('arCamera');
-      const wrap = document.getElementById('portraitWrap');
-      const imgA = document.getElementById('imgA');
-      const imgB = document.getElementById('imgB');
+      const canvas = document.getElementById('portraitCanvas');
+      const ctx = canvas.getContext('2d', { alpha: true });
 
-      let activeImg = imgA;
-      let passiveImg = imgB;
-      let sequencePos = 0;
-      let loopTimer = null;
-      let hideTimer = null;
+      const sheet = new Image();
+      sheet.src = './goethe_motion_sheet.png';
+
+      const FRAME_W = 360;
+      const FRAME_H = 450;
+      const COLS = 8;
+      const FRAME_COUNT = 48;
+      const FPS = 12;
+      const FRAME_MS = 1000 / FPS;
+
+      let sheetReady = false;
+      let currentFrame = 0;
+      let lastFrameTime = 0;
+
       let targetVisible = false;
+      let portraitSessionActive = false;
+      let hideTimer = null;
 
-      let baselineDistance = null;
+      let baselineDepth = null;
+      let depthSamples = [];
       let smoothedScale = 1.0;
-      let calibrationSamples = [];
 
-      const targetPos = new THREE.Vector3();
-      const cameraPos = new THREE.Vector3();
+      const worldPos = new THREE.Vector3();
+      const cameraSpacePos = new THREE.Vector3();
 
       const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-      function getWorldDistance() {
-        if (!target.object3D || !cameraEl.object3D) return null;
-
-        target.object3D.getWorldPosition(targetPos);
-        cameraEl.object3D.getWorldPosition(cameraPos);
-
-        const d = targetPos.distanceTo(cameraPos);
-
-        if (!Number.isFinite(d) || d < 0.01 || d > 50) return null;
-        return d;
+      function median(values) {
+        if (!values.length) return null;
+        const a = [...values].sort((x, y) => x - y);
+        const m = Math.floor(a.length / 2);
+        return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
       }
 
-      function median(arr) {
-        if (!arr.length) return null;
-        const s = [...arr].sort((a,b) => a-b);
-        const m = Math.floor(s.length / 2);
-        return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+      function drawFrame(index) {
+        if (!sheetReady) return;
+
+        const col = index % COLS;
+        const row = Math.floor(index / COLS);
+
+        ctx.clearRect(0, 0, FRAME_W, FRAME_H);
+        ctx.drawImage(
+          sheet,
+          col * FRAME_W, row * FRAME_H,
+          FRAME_W, FRAME_H,
+          0, 0,
+          FRAME_W, FRAME_H
+        );
+      }
+
+      sheet.onload = () => {
+        sheetReady = true;
+        drawFrame(0);
+      };
+
+      function getCameraDepth() {
+        const cam = sceneEl.camera;
+        if (!cam || !target.object3D) return null;
+
+        target.object3D.getWorldPosition(worldPos);
+
+        cameraSpacePos.copy(worldPos);
+        cameraSpacePos.applyMatrix4(cam.matrixWorldInverse);
+
+        const depth = Math.abs(cameraSpacePos.z);
+
+        if (!Number.isFinite(depth) || depth < 0.01 || depth > 50) return null;
+        return depth;
       }
 
       function updateScale() {
-        if (targetVisible) {
-          const d = getWorldDistance();
+        if (targetVisible && portraitSessionActive) {
+          const depth = getCameraDepth();
 
-          if (d) {
-            // Первые несколько кадров — спокойная автокалибровка
-            // под обычное расстояние, с которого читатель открыл страницу.
-            if (!baselineDistance) {
-              calibrationSamples.push(d);
+          if (depth) {
+            if (!baselineDepth) {
+              depthSamples.push(depth);
 
-              if (calibrationSamples.length >= 12) {
-                baselineDistance = median(calibrationSamples);
-                calibrationSamples = [];
+              if (depthSamples.length >= 10) {
+                baselineDepth = median(depthSamples);
+                depthSamples = [];
               }
             } else {
-              // ближе камера => больше портрет
-              // дальше камера => меньше портрет
-              const desired = clamp(baselineDistance / d, 0.62, 1.75);
+              // Приближаем телефон -> портрет растёт.
+              // Отдаляем -> уменьшается.
+              const desired = clamp(
+                Math.pow(baselineDepth / depth, 0.92),
+                0.60,
+                1.80
+              );
 
-              // Сглаживание масштаба: реагирует на движение руки,
-              // но не повторяет мелкую дрожь трекинга.
-              smoothedScale += (desired - smoothedScale) * 0.12;
+              smoothedScale += (desired - smoothedScale) * 0.14;
 
-              wrap.style.setProperty(
+              canvas.style.setProperty(
                 '--ar-scale',
                 smoothedScale.toFixed(4)
               );
@@ -191,55 +191,49 @@
         requestAnimationFrame(updateScale);
       }
 
-      function crossfadeTo(frameIndex) {
-        passiveImg.src = framePaths[frameIndex];
+      function animatePortrait(now) {
+        if (
+          portraitSessionActive &&
+          sheetReady &&
+          now - lastFrameTime >= FRAME_MS
+        ) {
+          lastFrameTime = now;
+          currentFrame = (currentFrame + 1) % FRAME_COUNT;
+          drawFrame(currentFrame);
+        }
 
-        // Двойной requestAnimationFrame даёт браузеру загрузить/отрисовать
-        // новый кадр до начала мягкого перекрытия.
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            passiveImg.classList.add('active');
-            activeImg.classList.remove('active');
-
-            const tmp = activeImg;
-            activeImg = passiveImg;
-            passiveImg = tmp;
-          });
-        });
+        requestAnimationFrame(animatePortrait);
       }
 
-      function scheduleNextFrame() {
-        clearTimeout(loopTimer);
+      function beginSession() {
+        portraitSessionActive = true;
+        targetVisible = true;
 
-        loopTimer = setTimeout(() => {
-          if (!targetVisible) return;
+        baselineDepth = null;
+        depthSamples = [];
+        smoothedScale = 1.0;
+        canvas.style.setProperty('--ar-scale', '1');
 
-          sequencePos = (sequencePos + 1) % sequence.length;
-          crossfadeTo(sequence[sequencePos]);
+        currentFrame = 0;
+        lastFrameTime = performance.now();
+        drawFrame(0);
 
-          scheduleNextFrame();
-        }, stepDuration);
+        canvas.classList.add('visible');
       }
 
-      function startLoop() {
-        clearTimeout(loopTimer);
+      function endSession() {
+        portraitSessionActive = false;
+        targetVisible = false;
 
-        sequencePos = 0;
-        activeImg.src = framePaths[sequence[0]];
-        passiveImg.src = framePaths[sequence[1]];
+        baselineDepth = null;
+        depthSamples = [];
+        smoothedScale = 1.0;
+        canvas.style.setProperty('--ar-scale', '1');
 
-        activeImg.classList.add('active');
-        passiveImg.classList.remove('active');
-
-        scheduleNextFrame();
+        canvas.classList.remove('visible');
       }
 
-      function stopLoop() {
-        clearTimeout(loopTimer);
-        loopTimer = null;
-      }
-
-      const showPortrait = () => {
+      target.addEventListener('targetFound', () => {
         targetVisible = true;
 
         if (hideTimer) {
@@ -247,39 +241,27 @@
           hideTimer = null;
         }
 
-        calibrationSamples = [];
-        baselineDistance = null;
-
-        if (!wrap.classList.contains('visible')) {
-          startLoop();
+        // Важно: повторное распознавание после краткого срыва
+        // НЕ перекалибровывает расстояние.
+        if (!portraitSessionActive) {
+          beginSession();
         }
+      });
 
-        wrap.classList.add('visible');
-      };
-
-      const scheduleHide = () => {
+      target.addEventListener('targetLost', () => {
         targetVisible = false;
 
         if (hideTimer) clearTimeout(hideTimer);
 
-        // Краткая потеря цели не должна мигать портретом.
+        // Короткий срыв камеры не уничтожает портрет и не сбрасывает масштаб.
         hideTimer = setTimeout(() => {
-          wrap.classList.remove('visible');
-          stopLoop();
-
-          baselineDistance = null;
-          calibrationSamples = [];
-          smoothedScale = 1.0;
-          wrap.style.setProperty('--ar-scale', '1');
-
+          endSession();
           hideTimer = null;
-        }, 1600);
-      };
-
-      target.addEventListener('targetFound', showPortrait);
-      target.addEventListener('targetLost', scheduleHide);
+        }, 1700);
+      });
 
       requestAnimationFrame(updateScale);
+      requestAnimationFrame(animatePortrait);
     });
   </script>
 
