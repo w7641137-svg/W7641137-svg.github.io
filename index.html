@@ -24,38 +24,82 @@
       z-index: 1;
     }
 
-    #portraitCanvas {
-      --ar-scale: 1;
+    #portraitWrap {
       position: fixed;
       left: 50%;
       top: 48%;
-      width: min(62vw, 390px);
-      height: auto;
+      width: min(60vw, 380px);
+      max-width: 380px;
       aspect-ratio: 4 / 5;
       opacity: 0;
       z-index: 20;
       pointer-events: none;
-      transform-origin: center center;
-      transform: translate(-50%, -50%) scale(calc(var(--ar-scale) * 0.965));
-      transition:
-        opacity 650ms ease,
-        transform 90ms linear;
-      will-change: opacity, transform;
+      transform: translate(-50%, -50%) scale(0.985);
+      transition: opacity 700ms ease, transform 700ms ease;
+      will-change: transform, opacity;
     }
 
-    #portraitCanvas.visible {
+    #portraitWrap.visible {
       opacity: 1;
-      transform: translate(-50%, -50%) scale(var(--ar-scale));
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* Деликатный приветственный кивок */
+    #portraitWrap.nodding {
+      animation: nodCycle 7.2s ease-in-out infinite;
+      transform-origin: 50% 18%;
+    }
+
+    @keyframes nodCycle {
+      0%, 26%, 100% {
+        transform: translate(-50%, -50%) rotate(0deg) translateY(0px) scale(1);
+      }
+      37% {
+        transform: translate(-50%, -49.1%) rotate(0.18deg) translateY(4px) scale(1);
+      }
+      48% {
+        transform: translate(-50%, -48.3%) rotate(0.35deg) translateY(9px) scale(1);
+      }
+      60% {
+        transform: translate(-50%, -49.1%) rotate(0.12deg) translateY(4px) scale(1);
+      }
+      72% {
+        transform: translate(-50%, -50%) rotate(0deg) translateY(0px) scale(1);
+      }
+    }
+
+    #portraitWrap img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    #openImg {
+      opacity: 1;
+    }
+
+    #blinkImg {
+      opacity: 0;
+      transition: opacity 80ms linear;
+    }
+
+    #portraitWrap.blink #blinkImg {
+      opacity: 1;
     }
   </style>
 </head>
-
 <body>
 
-  <canvas id="portraitCanvas" width="360" height="450"></canvas>
+  <div id="portraitWrap" aria-hidden="true">
+    <img id="openImg" src="./goethe_open.png" alt="">
+    <img id="blinkImg" src="./goethe_blink.png" alt="">
+  </div>
 
   <a-scene
-    id="scene"
     mindar-image="
       imageTargetSrc: ./targets.mind;
       autoStart: true;
@@ -63,7 +107,7 @@
       uiScanning: no;
       uiError: yes;
       warmupTolerance: 2;
-      missTolerance: 22;
+      missTolerance: 24;
       filterMinCF: 0.0005;
       filterBeta: 800;
     "
@@ -72,196 +116,80 @@
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false">
 
-    <a-camera id="arCamera" position="0 0 0" look-controls="enabled: false"></a-camera>
-
-    <!-- Страница только распознаётся.
-         Её наклон и дрожание портрету не передаются. -->
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
     <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
-
   </a-scene>
 
   <script>
     window.addEventListener('DOMContentLoaded', () => {
-      const sceneEl = document.getElementById('scene');
+      const wrap = document.getElementById('portraitWrap');
       const target = document.getElementById('goetheTarget');
-      const canvas = document.getElementById('portraitCanvas');
-      const ctx = canvas.getContext('2d', { alpha: true });
 
-      const sheet = new Image();
-      sheet.src = './goethe_motion_sheet.png';
-
-      const FRAME_W = 360;
-      const FRAME_H = 450;
-      const COLS = 8;
-      const FRAME_COUNT = 48;
-      const FPS = 12;
-      const FRAME_MS = 1000 / FPS;
-
-      let sheetReady = false;
-      let currentFrame = 0;
-      let lastFrameTime = 0;
-
-      let targetVisible = false;
-      let portraitSessionActive = false;
       let hideTimer = null;
+      let blinkLoop = null;
+      let active = false;
 
-      let baselineDepth = null;
-      let depthSamples = [];
-      let smoothedScale = 1.0;
+      function doBlink() {
+        if (!active) return;
 
-      const worldPos = new THREE.Vector3();
-      const cameraSpacePos = new THREE.Vector3();
+        // Моргание короткое и редкое.
+        wrap.classList.add('blink');
+        setTimeout(() => wrap.classList.remove('blink'), 170);
 
-      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-      function median(values) {
-        if (!values.length) return null;
-        const a = [...values].sort((x, y) => x - y);
-        const m = Math.floor(a.length / 2);
-        return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+        // Второе короткое смыкание — естественнее, чем один щелчок.
+        setTimeout(() => {
+          if (!active) return;
+          wrap.classList.add('blink');
+          setTimeout(() => wrap.classList.remove('blink'), 120);
+        }, 260);
       }
 
-      function drawFrame(index) {
-        if (!sheetReady) return;
-
-        const col = index % COLS;
-        const row = Math.floor(index / COLS);
-
-        ctx.clearRect(0, 0, FRAME_W, FRAME_H);
-        ctx.drawImage(
-          sheet,
-          col * FRAME_W, row * FRAME_H,
-          FRAME_W, FRAME_H,
-          0, 0,
-          FRAME_W, FRAME_H
-        );
+      function startBlinkLoop() {
+        clearInterval(blinkLoop);
+        blinkLoop = setInterval(() => {
+          // Моргание происходит спокойно и не слишком часто.
+          doBlink();
+        }, 7200);
       }
 
-      sheet.onload = () => {
-        sheetReady = true;
-        drawFrame(0);
-      };
-
-      function getCameraDepth() {
-        const cam = sceneEl.camera;
-        if (!cam || !target.object3D) return null;
-
-        target.object3D.getWorldPosition(worldPos);
-
-        cameraSpacePos.copy(worldPos);
-        cameraSpacePos.applyMatrix4(cam.matrixWorldInverse);
-
-        const depth = Math.abs(cameraSpacePos.z);
-
-        if (!Number.isFinite(depth) || depth < 0.01 || depth > 50) return null;
-        return depth;
-      }
-
-      function updateScale() {
-        if (targetVisible && portraitSessionActive) {
-          const depth = getCameraDepth();
-
-          if (depth) {
-            if (!baselineDepth) {
-              depthSamples.push(depth);
-
-              if (depthSamples.length >= 10) {
-                baselineDepth = median(depthSamples);
-                depthSamples = [];
-              }
-            } else {
-              // Приближаем телефон -> портрет растёт.
-              // Отдаляем -> уменьшается.
-              const desired = clamp(
-                Math.pow(baselineDepth / depth, 0.92),
-                0.60,
-                1.80
-              );
-
-              smoothedScale += (desired - smoothedScale) * 0.14;
-
-              canvas.style.setProperty(
-                '--ar-scale',
-                smoothedScale.toFixed(4)
-              );
-            }
-          }
-        }
-
-        requestAnimationFrame(updateScale);
-      }
-
-      function animatePortrait(now) {
-        if (
-          portraitSessionActive &&
-          sheetReady &&
-          now - lastFrameTime >= FRAME_MS
-        ) {
-          lastFrameTime = now;
-          currentFrame = (currentFrame + 1) % FRAME_COUNT;
-          drawFrame(currentFrame);
-        }
-
-        requestAnimationFrame(animatePortrait);
-      }
-
-      function beginSession() {
-        portraitSessionActive = true;
-        targetVisible = true;
-
-        baselineDepth = null;
-        depthSamples = [];
-        smoothedScale = 1.0;
-        canvas.style.setProperty('--ar-scale', '1');
-
-        currentFrame = 0;
-        lastFrameTime = performance.now();
-        drawFrame(0);
-
-        canvas.classList.add('visible');
-      }
-
-      function endSession() {
-        portraitSessionActive = false;
-        targetVisible = false;
-
-        baselineDepth = null;
-        depthSamples = [];
-        smoothedScale = 1.0;
-        canvas.style.setProperty('--ar-scale', '1');
-
-        canvas.classList.remove('visible');
-      }
-
-      target.addEventListener('targetFound', () => {
-        targetVisible = true;
+      function showPortrait() {
+        active = true;
 
         if (hideTimer) {
           clearTimeout(hideTimer);
           hideTimer = null;
         }
 
-        // Важно: повторное распознавание после краткого срыва
-        // НЕ перекалибровывает расстояние.
-        if (!portraitSessionActive) {
-          beginSession();
-        }
-      });
+        wrap.classList.add('visible');
+        wrap.classList.add('nodding');
 
-      target.addEventListener('targetLost', () => {
-        targetVisible = false;
+        if (!blinkLoop) {
+          // Первое моргание не сразу, чтобы сначала был спокойный взгляд.
+          setTimeout(() => {
+            if (active) doBlink();
+          }, 4100);
+          startBlinkLoop();
+        }
+      }
+
+      function hidePortraitDelayed() {
+        active = false;
 
         if (hideTimer) clearTimeout(hideTimer);
 
-        // Короткий срыв камеры не уничтожает портрет и не сбрасывает масштаб.
         hideTimer = setTimeout(() => {
-          endSession();
-          hideTimer = null;
-        }, 1700);
-      });
+          wrap.classList.remove('visible');
+          wrap.classList.remove('nodding');
+          wrap.classList.remove('blink');
 
-      requestAnimationFrame(updateScale);
-      requestAnimationFrame(animatePortrait);
+          clearInterval(blinkLoop);
+          blinkLoop = null;
+          hideTimer = null;
+        }, 1600);
+      }
+
+      target.addEventListener('targetFound', showPortrait);
+      target.addEventListener('targetLost', hidePortraitDelayed);
     });
   </script>
 
