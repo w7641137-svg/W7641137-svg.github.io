@@ -2,331 +2,702 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta name="theme-color" content="#000000">
-  <title>Гёте — AR</title>
-
-  <script src="https://cdn.jsdelivr.net/npm/aframe@1.6.0/dist/aframe-master.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#090909">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Живая книга Вольфсона</title>
 
   <style>
+    :root {
+      --paper: #efe7d6;
+      --ink: #201b16;
+      --glass: rgba(16, 15, 14, .82);
+    }
+
+    * { box-sizing: border-box; }
+
     html, body {
       margin: 0;
       width: 100%;
       height: 100%;
       overflow: hidden;
       background: #000;
+      font-family: Georgia, "Times New Roman", serif;
     }
 
-    a-scene {
+    #arRoot, a-scene {
       position: fixed !important;
       inset: 0 !important;
-      z-index: 1;
+      width: 100% !important;
+      height: 100% !important;
     }
 
-    /* Внешний слой = положение/масштаб/появление */
-    #portraitScaleWrap {
+    #arRoot { z-index: 1; }
+
+    .panel {
+      position: fixed;
+      z-index: 100;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 50% 35%, rgba(70,60,45,.18), transparent 42%),
+        rgba(0,0,0,.92);
+      color: var(--paper);
+    }
+
+    .panel.hidden { display: none; }
+
+    .card {
+      width: min(520px, 100%);
+      text-align: center;
+      padding: 30px 24px 26px;
+      border: 1px solid rgba(239,231,214,.22);
+      background: rgba(24,22,19,.75);
+      backdrop-filter: blur(8px);
+      border-radius: 18px;
+    }
+
+    .title {
+      margin: 0 0 12px;
+      font-size: clamp(26px, 7vw, 38px);
+      font-weight: 500;
+      letter-spacing: .04em;
+    }
+
+    .subtitle {
+      margin: 0 auto 24px;
+      max-width: 410px;
+      font-size: 16px;
+      line-height: 1.45;
+      color: rgba(239,231,214,.82);
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid rgba(239,231,214,.55);
+      border-radius: 999px;
+      padding: 14px 24px;
+      background: var(--paper);
+      color: var(--ink);
+      font: 600 16px/1 Georgia, "Times New Roman", serif;
+      cursor: pointer;
+      min-width: 210px;
+    }
+
+    button:disabled { opacity: .45; cursor: default; }
+
+    .small {
+      margin-top: 16px;
+      font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: rgba(239,231,214,.65);
+    }
+
+    #errorText {
+      text-align: left;
+      white-space: pre-line;
+      margin: 18px 0 20px;
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: rgba(239,231,214,.86);
+    }
+
+    #briefHint {
+      position: fixed;
+      z-index: 80;
+      left: 50%;
+      bottom: max(26px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.55);
+      color: rgba(255,255,255,.88);
+      font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      opacity: 0;
+      transition: opacity .4s ease;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    #briefHint.show { opacity: 1; }
+
+    /* ----- Portrait layer: independent from target tilt ----- */
+    .portrait {
       --ar-scale: 1;
       position: fixed;
       left: 50%;
       top: 48%;
-      width: min(60vw, 380px);
+      width: min(61vw, 390px);
       aspect-ratio: 4 / 5;
-      z-index: 20;
+      z-index: 30;
       pointer-events: none;
       opacity: 0;
       transform: translate(-50%, -50%) scale(var(--ar-scale));
-      transition: opacity 700ms ease, transform 120ms linear;
+      transition: opacity .7s ease, transform .11s linear;
       will-change: transform, opacity;
     }
 
-    #portraitScaleWrap.visible {
-      opacity: 1;
-    }
+    .portrait.visible { opacity: 1; }
 
-    /* Внутренний слой = медленный учтивый кивок */
-    #portraitPose {
+    .portrait-stage {
       position: absolute;
       inset: 0;
-      transform-origin: 50% 82%;
-      will-change: transform;
+      perspective: 1100px;
+      transform-style: preserve-3d;
     }
 
-    #portraitPose.nod {
-      animation: courteousNod 4.8s cubic-bezier(.42,0,.22,1) 1;
-    }
-
-    /* Медленный, учтивый, с небольшой паузой в нижней точке */
-    @keyframes courteousNod {
-      0%, 100% {
-        transform: translateY(0px) scaleY(1);
-      }
-      24% {
-        transform: translateY(0px) scaleY(1);
-      }
-      44% {
-        transform: translateY(4px) scaleY(0.994);
-      }
-      58% {
-        transform: translateY(9px) scaleY(0.984);
-      }
-      66% {
-        transform: translateY(10px) scaleY(0.982);
-      }
-      74% {
-        transform: translateY(9px) scaleY(0.984);
-      }
-      86% {
-        transform: translateY(4px) scaleY(0.994);
-      }
-    }
-
-    #portraitPose img {
+    .portrait img, .portrait picture {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
+    }
+
+    .portrait img {
       object-fit: contain;
       user-select: none;
       -webkit-user-drag: none;
     }
 
-    #openImg {
-      opacity: 1;
+    #goetheTorso { z-index: 1; }
+
+    #goetheHeadWrap {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      transform-origin: 50% 69%;
+      transform-style: preserve-3d;
+      will-change: transform;
+      backface-visibility: hidden;
     }
 
-    #blinkImg {
+    /*
+      Slow courteous nod:
+      - head/neck only
+      - no lateral turn
+      - long descent
+      - held lower point
+      - equally slow return
+    */
+    #goetheHeadWrap.nod {
+      animation: courteousNod 6.4s cubic-bezier(.36,0,.20,1) 1;
+    }
+
+    @keyframes courteousNod {
+      0%, 15%, 100% {
+        transform: translateY(0) rotateX(0deg) scaleY(1);
+      }
+      38% {
+        transform: translateY(2px) rotateX(3deg) scaleY(.992);
+      }
+      55% {
+        transform: translateY(4px) rotateX(7.2deg) scaleY(.972);
+      }
+      66% {
+        transform: translateY(4px) rotateX(7.2deg) scaleY(.972);
+      }
+      83% {
+        transform: translateY(2px) rotateX(3deg) scaleY(.992);
+      }
+    }
+
+    /* Small eyelid patch only; avoids switching the whole head. */
+    #goetheEyesClosed {
+      position: absolute;
+      left: 32.5%;
+      top: 20%;
+      width: 35%;
+      height: 16%;
+      z-index: 5;
       opacity: 0;
-      transition: opacity 80ms linear;
+      object-fit: fill;
+      transition: opacity .065s linear;
     }
 
-    #portraitPose.blink #blinkImg {
-      opacity: 1;
+    #goetheHeadWrap.blink #goetheEyesClosed { opacity: 1; }
+
+    #loadingLine {
+      margin-top: 14px;
+      min-height: 18px;
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: rgba(239,231,214,.62);
     }
   </style>
 </head>
-<body>
 
-  <div id="portraitScaleWrap">
-    <div id="portraitPose">
-      <img id="openImg" src="./goethe_open.png" alt="">
-      <img id="blinkImg" src="./goethe_blink.png" alt="">
+<body>
+  <div id="arRoot"></div>
+
+  <div id="launchPanel" class="panel">
+    <div class="card">
+      <h1 class="title">ЖИВАЯ КНИГА</h1>
+      <p class="subtitle">
+        Наведите камеру на автограф — и портрет появится над страницей.
+        Камера включится только после Вашего нажатия.
+      </p>
+      <button id="startButton" disabled>ОЖИВИТЬ КНИГУ</button>
+      <div id="loadingLine">Подготовка…</div>
+      <div class="small">Текст и звук в AR не используются.</div>
     </div>
   </div>
 
-  <a-scene
-    id="scene"
-    mindar-image="
-      imageTargetSrc: ./targets.mind;
-      autoStart: true;
-      uiLoading: yes;
-      uiScanning: no;
-      uiError: yes;
-      warmupTolerance: 2;
-      missTolerance: 24;
-      filterMinCF: 0.0005;
-      filterBeta: 800;
-    "
-    color-space="sRGB"
-    renderer="colorManagement: true; alpha: true; antialias: true"
-    vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: false">
+  <div id="errorPanel" class="panel hidden">
+    <div class="card">
+      <h1 class="title">Камера не включилась</h1>
+      <div id="errorText"></div>
+      <button id="retryButton">ПОПРОБОВАТЬ СНОВА</button>
+      <div class="small">
+        Если ссылка открыта внутри ВК, Telegram или другого приложения,
+        откройте её в Safari или Chrome.
+      </div>
+    </div>
+  </div>
 
-    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
-    <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
-  </a-scene>
+  <div id="briefHint">Наведите камеру на автограф</div>
+
+  <!-- Goethe AR portrait. Future heroes get their own .portrait block. -->
+  <div id="portrait-goethe" class="portrait" aria-hidden="true">
+    <div class="portrait-stage">
+      <picture id="goetheTorso">
+        <source srcset="./goethe_torso.webp" type="image/webp">
+        <img src="./goethe_torso.png" alt="">
+      </picture>
+
+      <div id="goetheHeadWrap">
+        <picture>
+          <source srcset="./goethe_head_open.webp" type="image/webp">
+          <img src="./goethe_head_open.png" alt="">
+        </picture>
+
+        <picture>
+          <source srcset="./goethe_eyes_closed.webp" type="image/webp">
+          <img id="goetheEyesClosed" src="./goethe_eyes_closed.png" alt="">
+        </picture>
+      </div>
+    </div>
+  </div>
 
   <script>
-    window.addEventListener('DOMContentLoaded', () => {
-      const scene = document.getElementById('scene');
-      const target = document.getElementById('goetheTarget');
-      const scaleWrap = document.getElementById('portraitScaleWrap');
-      const pose = document.getElementById('portraitPose');
+  (() => {
+    "use strict";
 
-      let active = false;
-      let hideTimer = null;
-      let nodTimer = null;
-      let blinkTimer = null;
+    /*
+      ARCHITECTURE:
+      One website, one camera, one targets.mind.
+      Add future heroes here after compiling all target images into the same
+      targets.mind in the same order.
+    */
+    const PORTRAITS = [
+      { targetIndex: 0, id: "goethe" }
+      // Future:
+      // { targetIndex: 1, id: "lomonosov" },
+      // { targetIndex: 2, id: "paganini" },
+    ];
 
-      // Масштабирование с фильтрацией дрожи
-      let baselineProjectedWidth = null;
-      let widthSamples = [];
-      let filteredWidth = null;
-      let targetScale = 1.0;
-      let currentScale = 1.0;
+    const LOCAL_AFRAME = "./aframe-1.6.0.min.js";
+    const LOCAL_MINDAR = "./mindar-image-aframe-1.2.5.prod.js";
 
-      const leftLocal = new THREE.Vector3(-0.5, 0, 0);
-      const rightLocal = new THREE.Vector3(0.5, 0, 0);
-      const leftWorld = new THREE.Vector3();
-      const rightWorld = new THREE.Vector3();
+    const REMOTE_AFRAME = "https://aframe.io/releases/1.6.0/aframe.min.js";
+    const REMOTE_MINDAR = "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js";
 
-      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    let scene = null;
+    let arSystem = null;
+    let activePortrait = null;
+    let activeTargetEntity = null;
+    let lossTimer = null;
+    let startInProgress = false;
 
-      function median(a) {
-        if (!a.length) return null;
-        const s = [...a].sort((x, y) => x - y);
-        const m = Math.floor(s.length / 2);
-        return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    const launchPanel = document.getElementById("launchPanel");
+    const errorPanel = document.getElementById("errorPanel");
+    const startButton = document.getElementById("startButton");
+    const retryButton = document.getElementById("retryButton");
+    const loadingLine = document.getElementById("loadingLine");
+    const errorText = document.getElementById("errorText");
+    const briefHint = document.getElementById("briefHint");
+
+    function isEmbeddedBrowser() {
+      return /FBAN|FBAV|Instagram|Line|MicroMessenger|Telegram|VKApp|VKiOS|VKAndroid/i.test(navigator.userAgent);
+    }
+
+    function loadScript(localSrc, remoteSrc) {
+      return new Promise((resolve, reject) => {
+        const local = document.createElement("script");
+        local.src = localSrc;
+        local.async = false;
+
+        local.onload = () => resolve("local");
+
+        local.onerror = () => {
+          local.remove();
+
+          const remote = document.createElement("script");
+          remote.src = remoteSrc;
+          remote.async = false;
+          remote.onload = () => resolve("remote");
+          remote.onerror = () => reject(new Error("library-load-failed"));
+          document.head.appendChild(remote);
+        };
+
+        document.head.appendChild(local);
+      });
+    }
+
+    async function loadLibraries() {
+      loadingLine.textContent = "Подготовка AR…";
+
+      const aframeSource = await loadScript(LOCAL_AFRAME, REMOTE_AFRAME);
+      const mindarSource = await loadScript(LOCAL_MINDAR, REMOTE_MINDAR);
+
+      if (aframeSource === "remote" || mindarSource === "remote") {
+        loadingLine.textContent = "Готово. Библиотеки пока загружены через резервный сервер.";
+      } else {
+        loadingLine.textContent = "Готово.";
+      }
+    }
+
+    function buildScene() {
+      const root = document.getElementById("arRoot");
+
+      root.innerHTML = `
+        <a-scene
+          id="scene"
+          mindar-image="
+            imageTargetSrc: ./targets.mind;
+            autoStart: false;
+            maxTrack: 1;
+            uiLoading: no;
+            uiScanning: no;
+            uiError: no;
+            warmupTolerance: 2;
+            missTolerance: 24;
+            filterMinCF: 0.0005;
+            filterBeta: 800;
+          "
+          color-space="sRGB"
+          renderer="colorManagement: true; alpha: true; antialias: true"
+          vr-mode-ui="enabled: false"
+          device-orientation-permission-ui="enabled: false">
+          <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+        </a-scene>
+      `;
+
+      scene = document.getElementById("scene");
+
+      for (const entry of PORTRAITS) {
+        const entity = document.createElement("a-entity");
+        entity.id = `target-${entry.id}`;
+        entity.dataset.targetIndex = entry.targetIndex;
+        entity.dataset.portraitId = entry.id;
+        entity.setAttribute("mindar-image-target", `targetIndex: ${entry.targetIndex}`);
+
+        entity.addEventListener("targetFound", () => onTargetFound(entry, entity));
+        entity.addEventListener("targetLost", () => onTargetLost(entry, entity));
+
+        scene.appendChild(entity);
       }
 
-      function getProjectedTargetWidth() {
-        const cam = scene.camera;
-        if (!cam || !target.object3D) return null;
+      scene.addEventListener("loaded", () => {
+        arSystem = scene.systems["mindar-image-system"];
+        startButton.disabled = false;
+        loadingLine.textContent = "Готово.";
+      });
 
-        target.object3D.updateMatrixWorld(true);
-        cam.updateMatrixWorld(true);
+      scene.addEventListener("arReady", () => {
+        startInProgress = false;
+        launchPanel.classList.add("hidden");
+        errorPanel.classList.add("hidden");
 
-        leftWorld.copy(leftLocal).applyMatrix4(target.object3D.matrixWorld).project(cam);
-        rightWorld.copy(rightLocal).applyMatrix4(target.object3D.matrixWorld).project(cam);
+        briefHint.classList.add("show");
+        setTimeout(() => briefHint.classList.remove("show"), 2400);
+      });
 
-        const w = Math.abs(rightWorld.x - leftWorld.x);
-        if (!Number.isFinite(w) || w < 0.001 || w > 5) return null;
-        return w;
+      scene.addEventListener("arError", () => {
+        startInProgress = false;
+        showCameraError();
+      });
+    }
+
+    async function startAR() {
+      if (!arSystem || startInProgress) return;
+
+      startInProgress = true;
+      startButton.disabled = true;
+      retryButton.disabled = true;
+
+      loadingLine.textContent = "Включаем камеру…";
+      errorPanel.classList.add("hidden");
+
+      try {
+        const result = arSystem.start();
+        if (result && typeof result.then === "function") {
+          await result;
+        }
+      } catch (err) {
+        startInProgress = false;
+        showCameraError(err);
+      } finally {
+        startButton.disabled = false;
+        retryButton.disabled = false;
+      }
+    }
+
+    function showCameraError() {
+      launchPanel.classList.add("hidden");
+      errorPanel.classList.remove("hidden");
+
+      const embedded = isEmbeddedBrowser()
+        ? "\n\nПохоже, страница открыта во встроенном браузере приложения. Выберите «Открыть в Safari» или «Открыть в Chrome»."
+        : "";
+
+      errorText.textContent =
+        "Для дополненной реальности необходим доступ к камере.\n\n" +
+        "Если Вы случайно нажали «Не разрешать», откройте настройки разрешений именно для этого сайта и разрешите камеру, затем вернитесь сюда и нажмите «Попробовать снова»." +
+        embedded;
+    }
+
+    startButton.addEventListener("click", startAR);
+    retryButton.addEventListener("click", startAR);
+
+    /*
+      Portrait runtime.
+      Target tilt is deliberately NOT applied to the portrait.
+      Tracking is used only to identify the page and to estimate deliberate
+      changes in camera distance.
+    */
+    const scaleState = {
+      baseline: null,
+      samples: [],
+      window: [],
+      targetScale: 1,
+      currentScale: 1
+    };
+
+    const projected = {
+      leftLocal: null,
+      rightLocal: null,
+      leftWorld: null,
+      rightWorld: null
+    };
+
+    function resetScale() {
+      scaleState.baseline = null;
+      scaleState.samples = [];
+      scaleState.window = [];
+      scaleState.targetScale = 1;
+      scaleState.currentScale = 1;
+
+      if (activePortrait) {
+        activePortrait.style.setProperty("--ar-scale", "1");
+      }
+    }
+
+    function median(arr) {
+      if (!arr.length) return null;
+      const s = [...arr].sort((a,b) => a-b);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+    }
+
+    function projectedTargetWidth(entity) {
+      if (!scene || !scene.camera || !entity || !window.THREE) return null;
+
+      if (!projected.leftLocal) {
+        projected.leftLocal = new THREE.Vector3(-0.5, 0, 0);
+        projected.rightLocal = new THREE.Vector3(0.5, 0, 0);
+        projected.leftWorld = new THREE.Vector3();
+        projected.rightWorld = new THREE.Vector3();
       }
 
-      function updateScale() {
-        if (active) {
-          const measuredWidth = getProjectedTargetWidth();
+      const cam = scene.camera;
+      entity.object3D.updateMatrixWorld(true);
+      cam.updateMatrixWorld(true);
 
-          if (measuredWidth) {
-            if (!baselineProjectedWidth) {
-              widthSamples.push(measuredWidth);
-              if (widthSamples.length >= 14) {
-                baselineProjectedWidth = median(widthSamples);
-                filteredWidth = baselineProjectedWidth;
-                widthSamples = [];
+      projected.leftWorld
+        .copy(projected.leftLocal)
+        .applyMatrix4(entity.object3D.matrixWorld)
+        .project(cam);
+
+      projected.rightWorld
+        .copy(projected.rightLocal)
+        .applyMatrix4(entity.object3D.matrixWorld)
+        .project(cam);
+
+      const w = Math.abs(projected.rightWorld.x - projected.leftWorld.x);
+      if (!Number.isFinite(w) || w < .001 || w > 5) return null;
+      return w;
+    }
+
+    function updateScale() {
+      if (activePortrait && activeTargetEntity) {
+        const measurement = projectedTargetWidth(activeTargetEntity);
+
+        if (measurement) {
+          if (!scaleState.baseline) {
+            scaleState.samples.push(measurement);
+
+            if (scaleState.samples.length >= 20) {
+              scaleState.baseline = median(scaleState.samples);
+              scaleState.samples = [];
+            }
+          } else {
+            // Rolling median rejects single-frame jumps.
+            scaleState.window.push(measurement);
+            if (scaleState.window.length > 21) scaleState.window.shift();
+
+            if (scaleState.window.length >= 9) {
+              const stableWidth = median(scaleState.window);
+              let ratio = stableWidth / scaleState.baseline;
+              ratio = Math.max(.68, Math.min(1.55, ratio));
+
+              // Hysteresis / dead zone: ignore normal tracking noise.
+              if (Math.abs(ratio - scaleState.targetScale) >= .085) {
+                scaleState.targetScale = ratio;
               }
-            } else {
-              filteredWidth += (measuredWidth - filteredWidth) * 0.08;
 
-              let rawScale = filteredWidth / baselineProjectedWidth;
-              rawScale = clamp(rawScale, 0.68, 1.55);
+              // Rate limiter: deliberate approach is preserved, jitter is not.
+              const delta = scaleState.targetScale - scaleState.currentScale;
+              let step = delta * .035;
+              step = Math.max(-.0028, Math.min(.0028, step));
 
-              if (Math.abs(rawScale - targetScale) > 0.045) {
-                targetScale = rawScale;
-              }
-
-              const delta = targetScale - currentScale;
-              let step = delta * 0.07;
-              step = clamp(step, -0.006, 0.006);
-              currentScale += step;
-
-              scaleWrap.style.setProperty('--ar-scale', currentScale.toFixed(4));
+              scaleState.currentScale += step;
+              activePortrait.style.setProperty(
+                "--ar-scale",
+                scaleState.currentScale.toFixed(4)
+              );
             }
           }
         }
-
-        requestAnimationFrame(updateScale);
       }
-
-      function blinkOnce() {
-        if (!active) return;
-        pose.classList.add('blink');
-        setTimeout(() => pose.classList.remove('blink'), 155);
-      }
-
-      function doCourteousNod() {
-        if (!active) return;
-
-        pose.classList.remove('nod');
-        void pose.offsetWidth;
-        pose.classList.add('nod');
-
-        // Очень деликатное моргание ближе к нижней точке кивка
-        setTimeout(() => {
-          if (active) blinkOnce();
-        }, 2450);
-
-        setTimeout(() => pose.classList.remove('nod'), 4850);
-      }
-
-      function scheduleNextNod() {
-        clearTimeout(nodTimer);
-        nodTimer = setTimeout(() => {
-          if (!active) return;
-          doCourteousNod();
-          scheduleNextNod();
-        }, 12000);
-      }
-
-      function scheduleNextBlink() {
-        clearTimeout(blinkTimer);
-        const delay = 8500 + Math.random() * 4500;
-        blinkTimer = setTimeout(() => {
-          if (!active) return;
-          blinkOnce();
-          scheduleNextBlink();
-        }, delay);
-      }
-
-      function begin() {
-        active = true;
-
-        if (hideTimer) {
-          clearTimeout(hideTimer);
-          hideTimer = null;
-        }
-
-        scaleWrap.classList.add('visible');
-
-        baselineProjectedWidth = null;
-        widthSamples = [];
-        filteredWidth = null;
-        targetScale = 1.0;
-        currentScale = 1.0;
-        scaleWrap.style.setProperty('--ar-scale', '1');
-
-        // Даём сначала просто посмотреть в глаза читателю
-        clearTimeout(nodTimer);
-        nodTimer = setTimeout(() => {
-          if (!active) return;
-          doCourteousNod();
-          scheduleNextNod();
-        }, 2200);
-
-        scheduleNextBlink();
-      }
-
-      function scheduleEnd() {
-        if (hideTimer) clearTimeout(hideTimer);
-
-        hideTimer = setTimeout(() => {
-          active = false;
-
-          clearTimeout(nodTimer);
-          clearTimeout(blinkTimer);
-          nodTimer = null;
-          blinkTimer = null;
-
-          pose.classList.remove('nod');
-          pose.classList.remove('blink');
-          scaleWrap.classList.remove('visible');
-
-          baselineProjectedWidth = null;
-          widthSamples = [];
-          filteredWidth = null;
-          targetScale = 1.0;
-          currentScale = 1.0;
-          scaleWrap.style.setProperty('--ar-scale', '1');
-
-          hideTimer = null;
-        }, 1700);
-      }
-
-      target.addEventListener('targetFound', () => {
-        if (!active) {
-          begin();
-        } else if (hideTimer) {
-          clearTimeout(hideTimer);
-          hideTimer = null;
-        }
-      });
-
-      target.addEventListener('targetLost', scheduleEnd);
 
       requestAnimationFrame(updateScale);
-    });
-  </script>
+    }
 
+    function onTargetFound(entry, entity) {
+      if (lossTimer) {
+        clearTimeout(lossTimer);
+        lossTimer = null;
+      }
+
+      const portrait = document.getElementById(`portrait-${entry.id}`);
+      if (!portrait) return;
+
+      if (activePortrait && activePortrait !== portrait) {
+        deactivatePortrait(activePortrait);
+      }
+
+      activePortrait = portrait;
+      activeTargetEntity = entity;
+      resetScale();
+
+      portrait.classList.add("visible");
+
+      if (entry.id === "goethe") startGoetheLife();
+    }
+
+    function onTargetLost(entry, entity) {
+      if (entity !== activeTargetEntity) return;
+
+      // Hold the portrait through brief tracking losses.
+      if (lossTimer) clearTimeout(lossTimer);
+
+      lossTimer = setTimeout(() => {
+        if (activePortrait) deactivatePortrait(activePortrait);
+
+        activePortrait = null;
+        activeTargetEntity = null;
+        resetScale();
+        lossTimer = null;
+      }, 1900);
+    }
+
+    function deactivatePortrait(portrait) {
+      portrait.classList.remove("visible");
+      if (portrait.id === "portrait-goethe") stopGoetheLife();
+    }
+
+    // ----- Goethe life -----
+    const goetheHead = document.getElementById("goetheHeadWrap");
+    let goetheNodTimer = null;
+    let goetheBlinkTimer = null;
+
+    function blinkGoethe() {
+      if (!activePortrait || activePortrait.id !== "portrait-goethe") return;
+      goetheHead.classList.add("blink");
+      setTimeout(() => goetheHead.classList.remove("blink"), 145);
+    }
+
+    function nodGoethe() {
+      if (!activePortrait || activePortrait.id !== "portrait-goethe") return;
+
+      goetheHead.classList.remove("nod");
+      void goetheHead.offsetWidth;
+      goetheHead.classList.add("nod");
+
+      // One discreet blink while the head is lowered.
+      setTimeout(() => {
+        if (activePortrait && activePortrait.id === "portrait-goethe") {
+          blinkGoethe();
+        }
+      }, 3900);
+
+      setTimeout(() => goetheHead.classList.remove("nod"), 6450);
+    }
+
+    function scheduleGoetheNod(first = false) {
+      clearTimeout(goetheNodTimer);
+      const delay = first ? 2300 : 15000;
+
+      goetheNodTimer = setTimeout(() => {
+        nodGoethe();
+        scheduleGoetheNod(false);
+      }, delay);
+    }
+
+    function scheduleGoetheBlink() {
+      clearTimeout(goetheBlinkTimer);
+      const delay = 8000 + Math.random() * 5000;
+
+      goetheBlinkTimer = setTimeout(() => {
+        blinkGoethe();
+        scheduleGoetheBlink();
+      }, delay);
+    }
+
+    function startGoetheLife() {
+      scheduleGoetheNod(true);
+      scheduleGoetheBlink();
+    }
+
+    function stopGoetheLife() {
+      clearTimeout(goetheNodTimer);
+      clearTimeout(goetheBlinkTimer);
+      goetheNodTimer = null;
+      goetheBlinkTimer = null;
+      goetheHead.classList.remove("nod", "blink");
+    }
+
+    // ----- Bootstrap -----
+    async function boot() {
+      try {
+        await loadLibraries();
+        buildScene();
+
+        if ("serviceWorker" in navigator && location.protocol === "https:") {
+          navigator.serviceWorker.register("./sw.js").catch(() => {});
+        }
+      } catch (err) {
+        startButton.disabled = true;
+        loadingLine.textContent = "Не удалось загрузить AR-движок.";
+        errorText.textContent =
+          "Не удалось загрузить библиотеки дополненной реальности. Проверьте соединение с интернетом и обновите страницу.";
+      }
+
+      requestAnimationFrame(updateScale);
+    }
+
+    boot();
+  })();
+  </script>
 </body>
 </html>
