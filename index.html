@@ -24,51 +24,61 @@
       z-index: 1;
     }
 
-    #portraitWrap {
+    /* Внешний слой отвечает ТОЛЬКО за положение и масштаб. */
+    #portraitScaleWrap {
+      --ar-scale: 1;
       position: fixed;
       left: 50%;
       top: 48%;
       width: min(60vw, 380px);
-      max-width: 380px;
       aspect-ratio: 4 / 5;
-      opacity: 0;
       z-index: 20;
       pointer-events: none;
-      transform: translate(-50%, -50%) scale(0.985);
-      transition: opacity 700ms ease, transform 700ms ease;
+      opacity: 0;
+
+      transform:
+        translate(-50%, -50%)
+        scale(var(--ar-scale));
+
+      transition:
+        opacity 650ms ease,
+        transform 110ms linear;
+
       will-change: transform, opacity;
+      perspective: 900px;
     }
 
-    #portraitWrap.visible {
+    #portraitScaleWrap.visible {
       opacity: 1;
-      transform: translate(-50%, -50%) scale(1);
     }
 
-    /* Деликатный приветственный кивок */
-    #portraitWrap.nodding {
-      animation: nodCycle 7.2s ease-in-out infinite;
-      transform-origin: 50% 18%;
+    /* Внутренний слой отвечает ТОЛЬКО за деликатный кивок. */
+    #portraitPose {
+      position: absolute;
+      inset: 0;
+      transform-origin: 50% 78%;
+      will-change: transform;
     }
 
-    @keyframes nodCycle {
-      0%, 26%, 100% {
-        transform: translate(-50%, -50%) rotate(0deg) translateY(0px) scale(1);
+    #portraitPose.nod {
+      animation: gentleNod 2.5s cubic-bezier(.42,0,.25,1) 1;
+    }
+
+    @keyframes gentleNod {
+      0%, 100% {
+        transform: translateY(0) rotateX(0deg);
       }
-      37% {
-        transform: translate(-50%, -49.1%) rotate(0.18deg) translateY(4px) scale(1);
-      }
+
       48% {
-        transform: translate(-50%, -48.3%) rotate(0.35deg) translateY(9px) scale(1);
+        transform: translateY(5px) rotateX(0.9deg);
       }
-      60% {
-        transform: translate(-50%, -49.1%) rotate(0.12deg) translateY(4px) scale(1);
-      }
-      72% {
-        transform: translate(-50%, -50%) rotate(0deg) translateY(0px) scale(1);
+
+      66% {
+        transform: translateY(3px) rotateX(0.45deg);
       }
     }
 
-    #portraitWrap img {
+    #portraitPose img {
       position: absolute;
       inset: 0;
       width: 100%;
@@ -84,22 +94,26 @@
 
     #blinkImg {
       opacity: 0;
-      transition: opacity 80ms linear;
+      transition: opacity 75ms linear;
     }
 
-    #portraitWrap.blink #blinkImg {
+    #portraitPose.blink #blinkImg {
       opacity: 1;
     }
   </style>
 </head>
+
 <body>
 
-  <div id="portraitWrap" aria-hidden="true">
-    <img id="openImg" src="./goethe_open.png" alt="">
-    <img id="blinkImg" src="./goethe_blink.png" alt="">
+  <div id="portraitScaleWrap">
+    <div id="portraitPose">
+      <img id="openImg" src="./goethe_open.png" alt="">
+      <img id="blinkImg" src="./goethe_blink.png" alt="">
+    </div>
   </div>
 
   <a-scene
+    id="scene"
     mindar-image="
       imageTargetSrc: ./targets.mind;
       autoStart: true;
@@ -117,42 +131,158 @@
     device-orientation-permission-ui="enabled: false">
 
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+    <!-- Маркер только распознаётся. Его наклон портрету не передаётся. -->
     <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
+
   </a-scene>
 
   <script>
     window.addEventListener('DOMContentLoaded', () => {
-      const wrap = document.getElementById('portraitWrap');
+      const scene = document.getElementById('scene');
       const target = document.getElementById('goetheTarget');
 
-      let hideTimer = null;
-      let blinkLoop = null;
-      let active = false;
+      const scaleWrap = document.getElementById('portraitScaleWrap');
+      const pose = document.getElementById('portraitPose');
 
-      function doBlink() {
+      let active = false;
+      let hideTimer = null;
+
+      let nodTimer = null;
+      let blinkTimer = null;
+
+      let baselineProjectedWidth = null;
+      let widthSamples = [];
+      let smoothedScale = 1.0;
+
+      const leftLocal  = new THREE.Vector3(-0.5, 0, 0);
+      const rightLocal = new THREE.Vector3( 0.5, 0, 0);
+      const leftWorld  = new THREE.Vector3();
+      const rightWorld = new THREE.Vector3();
+
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+      function median(a) {
+        if (!a.length) return null;
+        const s = [...a].sort((x,y) => x-y);
+        const m = Math.floor(s.length / 2);
+        return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+      }
+
+      /*
+       * Самый надёжный способ для нашей задачи:
+       * измеряем, насколько ШИРОКО сама страница выглядит в кадре.
+       *
+       * Телефон ближе -> страница на экране крупнее -> портрет крупнее.
+       * Телефон дальше -> страница меньше -> портрет меньше.
+       */
+      function getProjectedTargetWidth() {
+        const cam = scene.camera;
+
+        if (!cam || !target.object3D) return null;
+
+        target.object3D.updateMatrixWorld(true);
+        cam.updateMatrixWorld(true);
+
+        leftWorld.copy(leftLocal)
+          .applyMatrix4(target.object3D.matrixWorld)
+          .project(cam);
+
+        rightWorld.copy(rightLocal)
+          .applyMatrix4(target.object3D.matrixWorld)
+          .project(cam);
+
+        const w = Math.abs(rightWorld.x - leftWorld.x);
+
+        if (!Number.isFinite(w) || w < 0.001 || w > 5) return null;
+        return w;
+      }
+
+      function updateScale() {
+        if (active) {
+          const currentWidth = getProjectedTargetWidth();
+
+          if (currentWidth) {
+            if (!baselineProjectedWidth) {
+              widthSamples.push(currentWidth);
+
+              if (widthSamples.length >= 12) {
+                baselineProjectedWidth = median(widthSamples);
+                widthSamples = [];
+              }
+            } else {
+              const desired = clamp(
+                currentWidth / baselineProjectedWidth,
+                0.62,
+                1.80
+              );
+
+              smoothedScale += (desired - smoothedScale) * 0.12;
+
+              scaleWrap.style.setProperty(
+                '--ar-scale',
+                smoothedScale.toFixed(4)
+              );
+            }
+          }
+        }
+
+        requestAnimationFrame(updateScale);
+      }
+
+      function blinkOnce() {
         if (!active) return;
 
-        // Моргание короткое и редкое.
-        wrap.classList.add('blink');
-        setTimeout(() => wrap.classList.remove('blink'), 170);
+        pose.classList.add('blink');
 
-        // Второе короткое смыкание — естественнее, чем один щелчок.
         setTimeout(() => {
-          if (!active) return;
-          wrap.classList.add('blink');
-          setTimeout(() => wrap.classList.remove('blink'), 120);
-        }, 260);
+          pose.classList.remove('blink');
+        }, 155);
       }
 
-      function startBlinkLoop() {
-        clearInterval(blinkLoop);
-        blinkLoop = setInterval(() => {
-          // Моргание происходит спокойно и не слишком часто.
-          doBlink();
-        }, 7200);
+      function doGreetingNod() {
+        if (!active) return;
+
+        pose.classList.remove('nod');
+
+        // Перезапуск CSS-анимации.
+        void pose.offsetWidth;
+
+        pose.classList.add('nod');
+
+        // Моргание почти в нижней точке кивка.
+        setTimeout(() => {
+          blinkOnce();
+        }, 1120);
+
+        setTimeout(() => {
+          pose.classList.remove('nod');
+        }, 2550);
       }
 
-      function showPortrait() {
+      function scheduleNextNod() {
+        clearTimeout(nodTimer);
+
+        nodTimer = setTimeout(() => {
+          doGreetingNod();
+
+          if (active) scheduleNextNod();
+        }, 10500);
+      }
+
+      function scheduleNextBlink() {
+        clearTimeout(blinkTimer);
+
+        const delay = 6500 + Math.random() * 4500;
+
+        blinkTimer = setTimeout(() => {
+          blinkOnce();
+
+          if (active) scheduleNextBlink();
+        }, delay);
+      }
+
+      function begin() {
         active = true;
 
         if (hideTimer) {
@@ -160,36 +290,62 @@
           hideTimer = null;
         }
 
-        wrap.classList.add('visible');
-        wrap.classList.add('nodding');
+        scaleWrap.classList.add('visible');
 
-        if (!blinkLoop) {
-          // Первое моргание не сразу, чтобы сначала был спокойный взгляд.
-          setTimeout(() => {
-            if (active) doBlink();
-          }, 4100);
-          startBlinkLoop();
-        }
+        baselineProjectedWidth = null;
+        widthSamples = [];
+        smoothedScale = 1.0;
+        scaleWrap.style.setProperty('--ar-scale', '1');
+
+        // Не кланяется сразу в лицо — сначала "смотрит" на читателя.
+        clearTimeout(nodTimer);
+        nodTimer = setTimeout(() => {
+          doGreetingNod();
+          scheduleNextNod();
+        }, 1800);
+
+        scheduleNextBlink();
       }
 
-      function hidePortraitDelayed() {
-        active = false;
-
+      function scheduleEnd() {
         if (hideTimer) clearTimeout(hideTimer);
 
         hideTimer = setTimeout(() => {
-          wrap.classList.remove('visible');
-          wrap.classList.remove('nodding');
-          wrap.classList.remove('blink');
+          active = false;
 
-          clearInterval(blinkLoop);
-          blinkLoop = null;
+          clearTimeout(nodTimer);
+          clearTimeout(blinkTimer);
+
+          nodTimer = null;
+          blinkTimer = null;
+
+          pose.classList.remove('nod');
+          pose.classList.remove('blink');
+          scaleWrap.classList.remove('visible');
+
+          baselineProjectedWidth = null;
+          widthSamples = [];
+          smoothedScale = 1.0;
+          scaleWrap.style.setProperty('--ar-scale', '1');
+
           hideTimer = null;
-        }, 1600);
+        }, 1700);
       }
 
-      target.addEventListener('targetFound', showPortrait);
-      target.addEventListener('targetLost', hidePortraitDelayed);
+      target.addEventListener('targetFound', () => {
+        if (!active) {
+          begin();
+        } else if (hideTimer) {
+          clearTimeout(hideTimer);
+          hideTimer = null;
+        }
+      });
+
+      target.addEventListener('targetLost', () => {
+        scheduleEnd();
+      });
+
+      requestAnimationFrame(updateScale);
     });
   </script>
 
