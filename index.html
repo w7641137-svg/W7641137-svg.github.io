@@ -35,10 +35,11 @@
       opacity: 0;
       z-index: 20;
       pointer-events: none;
+      transform-origin: center center;
       transform: translate(-50%, -50%) scale(calc(var(--ar-scale) * 0.965));
       transition:
-        opacity 600ms ease,
-        transform 120ms linear;
+        opacity 650ms ease,
+        transform 90ms linear;
       will-change: opacity, transform;
     }
 
@@ -54,7 +55,7 @@
       height: 100%;
       object-fit: contain;
       opacity: 0;
-      transition: opacity 420ms ease-in-out;
+      transition: opacity 1150ms ease-in-out;
       will-change: opacity;
       user-select: none;
       -webkit-user-drag: none;
@@ -80,7 +81,7 @@
       uiScanning: no;
       uiError: yes;
       warmupTolerance: 2;
-      missTolerance: 18;
+      missTolerance: 22;
       filterMinCF: 0.0005;
       filterBeta: 800;
     "
@@ -91,8 +92,10 @@
 
     <a-camera id="arCamera" position="0 0 0" look-controls="enabled: false"></a-camera>
 
-    <!-- Маркер нужен только для распознавания и измерения расстояния -->
+    <!-- Маркер даёт только факт распознавания и расстояние.
+         Его наклон и дрожание портрету не передаются. -->
     <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
+
   </a-scene>
 
   <script>
@@ -104,75 +107,130 @@
         './goethe_frame4.png'
       ];
 
-      // Предзагрузка кадров
-      framePaths.forEach(src => { const i = new Image(); i.src = src; });
+      framePaths.forEach(src => {
+        const i = new Image();
+        i.src = src;
+      });
 
-      const durations = [800, 700, 900, 800];
+      // Спокойный цикл туда и обратно — без резкого прыжка 4 -> 1.
+      const sequence = [0, 1, 2, 3, 2, 1];
+      const stepDuration = 1550; // время между фазами, мс
 
       const target = document.getElementById('goetheTarget');
+      const cameraEl = document.getElementById('arCamera');
       const wrap = document.getElementById('portraitWrap');
       const imgA = document.getElementById('imgA');
       const imgB = document.getElementById('imgB');
 
-      let hideTimer = null;
-      let baselineDistance = null;
-      let smoothedScale = 1.0;
-      let targetVisible = false;
-
       let activeImg = imgA;
       let passiveImg = imgB;
-      let currentFrame = 0;
+      let sequencePos = 0;
       let loopTimer = null;
+      let hideTimer = null;
+      let targetVisible = false;
+
+      let baselineDistance = null;
+      let smoothedScale = 1.0;
+      let calibrationSamples = [];
+
+      const targetPos = new THREE.Vector3();
+      const cameraPos = new THREE.Vector3();
 
       const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-      function currentDistance() {
-        const p = target.object3D.position;
-        const d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-        return Number.isFinite(d) && d > 0.001 ? d : null;
+      function getWorldDistance() {
+        if (!target.object3D || !cameraEl.object3D) return null;
+
+        target.object3D.getWorldPosition(targetPos);
+        cameraEl.object3D.getWorldPosition(cameraPos);
+
+        const d = targetPos.distanceTo(cameraPos);
+
+        if (!Number.isFinite(d) || d < 0.01 || d > 50) return null;
+        return d;
       }
 
-      function animateScale() {
+      function median(arr) {
+        if (!arr.length) return null;
+        const s = [...arr].sort((a,b) => a-b);
+        const m = Math.floor(s.length / 2);
+        return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+      }
+
+      function updateScale() {
         if (targetVisible) {
-          const d = currentDistance();
+          const d = getWorldDistance();
+
           if (d) {
-            if (!baselineDistance) baselineDistance = d;
-            const desired = clamp(baselineDistance / d, 0.72, 1.55);
-            smoothedScale += (desired - smoothedScale) * 0.075;
-            wrap.style.setProperty('--ar-scale', smoothedScale.toFixed(4));
+            // Первые несколько кадров — спокойная автокалибровка
+            // под обычное расстояние, с которого читатель открыл страницу.
+            if (!baselineDistance) {
+              calibrationSamples.push(d);
+
+              if (calibrationSamples.length >= 12) {
+                baselineDistance = median(calibrationSamples);
+                calibrationSamples = [];
+              }
+            } else {
+              // ближе камера => больше портрет
+              // дальше камера => меньше портрет
+              const desired = clamp(baselineDistance / d, 0.62, 1.75);
+
+              // Сглаживание масштаба: реагирует на движение руки,
+              // но не повторяет мелкую дрожь трекинга.
+              smoothedScale += (desired - smoothedScale) * 0.12;
+
+              wrap.style.setProperty(
+                '--ar-scale',
+                smoothedScale.toFixed(4)
+              );
+            }
           }
         }
-        requestAnimationFrame(animateScale);
+
+        requestAnimationFrame(updateScale);
       }
 
-      function crossfadeTo(index) {
-        passiveImg.src = framePaths[index];
-        passiveImg.classList.add('active');
-        activeImg.classList.remove('active');
+      function crossfadeTo(frameIndex) {
+        passiveImg.src = framePaths[frameIndex];
 
-        const tmp = activeImg;
-        activeImg = passiveImg;
-        passiveImg = tmp;
-        currentFrame = index;
+        // Двойной requestAnimationFrame даёт браузеру загрузить/отрисовать
+        // новый кадр до начала мягкого перекрытия.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            passiveImg.classList.add('active');
+            activeImg.classList.remove('active');
+
+            const tmp = activeImg;
+            activeImg = passiveImg;
+            passiveImg = tmp;
+          });
+        });
       }
 
       function scheduleNextFrame() {
         clearTimeout(loopTimer);
+
         loopTimer = setTimeout(() => {
           if (!targetVisible) return;
-          const next = (currentFrame + 1) % framePaths.length;
-          crossfadeTo(next);
+
+          sequencePos = (sequencePos + 1) % sequence.length;
+          crossfadeTo(sequence[sequencePos]);
+
           scheduleNextFrame();
-        }, durations[currentFrame]);
+        }, stepDuration);
       }
 
       function startLoop() {
         clearTimeout(loopTimer);
-        currentFrame = 0;
-        activeImg.src = framePaths[0];
-        passiveImg.src = framePaths[1];
+
+        sequencePos = 0;
+        activeImg.src = framePaths[sequence[0]];
+        passiveImg.src = framePaths[sequence[1]];
+
         activeImg.classList.add('active');
         passiveImg.classList.remove('active');
+
         scheduleNextFrame();
       }
 
@@ -189,8 +247,8 @@
           hideTimer = null;
         }
 
-        const d = currentDistance();
-        if (d && !baselineDistance) baselineDistance = d;
+        calibrationSamples = [];
+        baselineDistance = null;
 
         if (!wrap.classList.contains('visible')) {
           startLoop();
@@ -204,20 +262,24 @@
 
         if (hideTimer) clearTimeout(hideTimer);
 
+        // Краткая потеря цели не должна мигать портретом.
         hideTimer = setTimeout(() => {
           wrap.classList.remove('visible');
           stopLoop();
-          hideTimer = null;
+
           baselineDistance = null;
+          calibrationSamples = [];
           smoothedScale = 1.0;
           wrap.style.setProperty('--ar-scale', '1');
-        }, 1400);
+
+          hideTimer = null;
+        }, 1600);
       };
 
       target.addEventListener('targetFound', showPortrait);
       target.addEventListener('targetLost', scheduleHide);
 
-      requestAnimationFrame(animateScale);
+      requestAnimationFrame(updateScale);
     });
   </script>
 
