@@ -1,40 +1,279 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#000"><title>Живая книга Вольфсона</title>
-<script src="https://cdn.jsdelivr.net/npm/aframe@1.6.0/dist/aframe-master.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
-<style>
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}body{font-family:Georgia,"Times New Roman",serif}
-#arRoot,a-scene{position:fixed!important;inset:0!important;width:100%!important;height:100%!important}#arRoot{z-index:1}
-.panel{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.93);color:#efe7d6}.panel.hidden{display:none}.card{width:min(520px,100%);padding:30px 24px 26px;text-align:center;border:1px solid rgba(239,231,214,.22);border-radius:18px;background:rgba(24,22,19,.82)}h1{margin:0 0 12px;font-size:clamp(26px,7vw,38px);font-weight:500;letter-spacing:.04em}p{margin:0 auto 22px;max-width:410px;font-size:16px;line-height:1.45;color:rgba(239,231,214,.82)}button{appearance:none;border:1px solid rgba(239,231,214,.55);border-radius:999px;padding:14px 24px;background:#efe7d6;color:#201b16;font:600 16px/1 Georgia,"Times New Roman",serif;min-width:210px}.small{margin-top:14px;font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:rgba(239,231,214,.65)}#errorText{text-align:left;white-space:pre-line;margin:18px 0 20px;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:rgba(239,231,214,.86)}
-#hint{position:fixed;z-index:80;left:50%;bottom:max(26px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:9px 14px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font:13px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:0;transition:opacity .4s;pointer-events:none}#hint.show{opacity:1}
-.portrait{--ar-scale:1;position:fixed;left:50%;top:48%;width:min(61vw,390px);aspect-ratio:4/5;z-index:30;pointer-events:none;opacity:0;transform:translate(-50%,-50%) scale(var(--ar-scale));transition:opacity .7s ease,transform .11s linear;will-change:transform,opacity}.portrait.visible{opacity:1}.portrait-stage{position:absolute;inset:0}.portrait-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-</style></head><body>
-<div id="arRoot"></div>
-<div id="launchPanel" class="panel"><div class="card"><h1>ЖИВАЯ КНИГА</h1><p>Наведите камеру на автограф — портрет появится над страницей. Камера включится только после Вашего нажатия.</p><button id="startButton" disabled>ОЖИВИТЬ КНИГУ</button><div id="status" class="small">Подготовка…</div></div></div>
-<div id="errorPanel" class="panel hidden"><div class="card"><h1>Не удалось запустить AR</h1><div id="errorText"></div><button id="retryButton">ПОПРОБОВАТЬ СНОВА</button></div></div>
-<div id="hint">Наведите камеру на автограф</div>
-<div id="portrait-goethe" class="portrait" aria-hidden="true"><div class="portrait-stage"><canvas id="portraitCanvas" width="640" height="800"></canvas></div></div>
-<script src="heroes.js?v=6"></script><script src="sequence-player.js?v=6"></script>
-<script>
-(()=>{'use strict';
-const launchPanel=document.getElementById('launchPanel'),errorPanel=document.getElementById('errorPanel'),startButton=document.getElementById('startButton'),retryButton=document.getElementById('retryButton'),status=document.getElementById('status'),errorText=document.getElementById('errorText'),hint=document.getElementById('hint');
-const portrait=document.getElementById('portrait-goethe'),canvas=document.getElementById('portraitCanvas');
-let scene=null,arSystem=null,targetEntity=null,active=false,lossTimer=null,starting=false,player=null;
-async function removeOldSW(){try{if('serviceWorker'in navigator){const rs=await navigator.serviceWorker.getRegistrations();await Promise.all(rs.map(r=>r.unregister()));}if('caches'in window){const ks=await caches.keys();await Promise.all(ks.filter(k=>k.startsWith('wolfson-live-book')).map(k=>caches.delete(k)));}}catch(e){}}
-function showFatal(s){launchPanel.classList.add('hidden');errorPanel.classList.remove('hidden');errorText.textContent=s;}
-function buildScene(){document.getElementById('arRoot').innerHTML=`<a-scene id="scene" mindar-image="imageTargetSrc: ./targets.mind?v=6; autoStart: false; maxTrack: 1; uiLoading: no; uiScanning: no; uiError: no; warmupTolerance: 2; missTolerance: 24; filterMinCF: 0.0005; filterBeta: 800;" color-space="sRGB" renderer="colorManagement: true; alpha: true; antialias: true" vr-mode-ui="enabled:false" device-orientation-permission-ui="enabled:false"><a-camera position="0 0 0" look-controls="enabled:false"></a-camera><a-entity id="goetheTarget" mindar-image-target="targetIndex:0"></a-entity></a-scene>`;scene=document.getElementById('scene');targetEntity=document.getElementById('goetheTarget');targetEntity.addEventListener('targetFound',onFound);targetEntity.addEventListener('targetLost',onLost);scene.addEventListener('loaded',()=>{arSystem=scene.systems['mindar-image-system'];startButton.disabled=false;status.textContent='Готово.'});scene.addEventListener('arReady',()=>{starting=false;launchPanel.classList.add('hidden');errorPanel.classList.add('hidden');hint.classList.add('show');setTimeout(()=>hint.classList.remove('show'),2200)});scene.addEventListener('arError',()=>{starting=false;showCameraError()});}
-function showCameraError(){showFatal('Камера не включилась.\n\nЕсли Вы случайно запретили доступ, разрешите камеру для этого сайта в настройках браузера и нажмите «Попробовать снова».\n\nЕсли ссылка открыта внутри другого приложения, откройте её непосредственно в Safari или Chrome.');}
-async function startAR(){if(!arSystem||starting)return;starting=true;startButton.disabled=true;retryButton.disabled=true;status.textContent='Включаем камеру…';try{const r=arSystem.start();if(r&&typeof r.then==='function')await r;}catch(e){starting=false;showCameraError()}finally{startButton.disabled=false;retryButton.disabled=false;}}
-startButton.addEventListener('click',startAR);retryButton.addEventListener('click',startAR);
-async function ensurePlayer(){if(player)return player;const p=createCanvasSequencePlayer({canvas});await p.load(window.HEROES[0]);player=p;return p;}
-async function onFound(){if(lossTimer){clearTimeout(lossTimer);lossTimer=null}if(active)return;active=true;resetScale();portrait.classList.add('visible');try{const p=await ensurePlayer();if(active)p.start();}catch(e){console.error(e)}}
-function onLost(){if(lossTimer)clearTimeout(lossTimer);lossTimer=setTimeout(()=>{active=false;if(player)player.stop();portrait.classList.remove('visible');resetScale();lossTimer=null},1900)}
-const ss={baseline:null,samples:[],window:[],target:1,current:1};let L,R,LW,RW;
-function median(a){const s=[...a].sort((x,y)=>x-y),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2}
-function resetScale(){ss.baseline=null;ss.samples=[];ss.window=[];ss.target=1;ss.current=1;portrait.style.setProperty('--ar-scale','1')}
-function projectedWidth(){if(!active||!scene||!scene.camera||!targetEntity||!window.THREE)return null;if(!L){L=new THREE.Vector3(-.5,0,0);R=new THREE.Vector3(.5,0,0);LW=new THREE.Vector3();RW=new THREE.Vector3()}targetEntity.object3D.updateMatrixWorld(true);scene.camera.updateMatrixWorld(true);LW.copy(L).applyMatrix4(targetEntity.object3D.matrixWorld).project(scene.camera);RW.copy(R).applyMatrix4(targetEntity.object3D.matrixWorld).project(scene.camera);const w=Math.abs(RW.x-LW.x);return Number.isFinite(w)&&w>.001&&w<5?w:null}
-function scaleLoop(){if(active){const m=projectedWidth();if(m){if(!ss.baseline){ss.samples.push(m);if(ss.samples.length>=20){ss.baseline=median(ss.samples);ss.samples=[]}}else{ss.window.push(m);if(ss.window.length>21)ss.window.shift();if(ss.window.length>=9){let ratio=median(ss.window)/ss.baseline;ratio=Math.max(.68,Math.min(1.55,ratio));if(Math.abs(ratio-ss.target)>=.085)ss.target=ratio;const d=ss.target-ss.current;let step=Math.max(-.0028,Math.min(.0028,d*.035));ss.current+=step;portrait.style.setProperty('--ar-scale',ss.current.toFixed(4));}}}}requestAnimationFrame(scaleLoop)}
-async function preflight(){const im=new Image();im.src=window.HEROES[0].base;if(im.decode)await im.decode();}
-async function boot(){await removeOldSW();try{await preflight();status.textContent='Портрет готов. Подготовка AR…';buildScene();}catch(e){showFatal('Не загрузился портрет. Обновите файлы сборки и перезагрузите страницу.')}requestAnimationFrame(scaleLoop)}boot();
-})();
-</script></body></html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>Гёте — дополненная реальность</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/aframe@1.6.0/dist/aframe-master.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    a-scene {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 1;
+    }
+
+    #portrait {
+      --s: 1;
+      position: fixed;
+      left: 50%;
+      top: 49%;
+      width: min(68vw, 420px);
+      max-height: 78vh;
+      object-fit: contain;
+      transform: translate(-50%, -50%) scale(var(--s));
+      transform-origin: center center;
+      opacity: 0;
+      z-index: 20;
+      pointer-events: none;
+      transition: opacity 420ms ease;
+      will-change: transform, opacity;
+      filter: drop-shadow(0 10px 24px rgba(0,0,0,.26));
+    }
+
+    #portrait.visible { opacity: 1; }
+
+    #startScreen {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      box-sizing: border-box;
+      background: radial-gradient(circle at 50% 35%, #29231d 0%, #12100e 52%, #050505 100%);
+      color: #f1eadf;
+      text-align: center;
+    }
+
+    #startCard {
+      width: min(88vw, 430px);
+      padding: 28px 24px 24px;
+      border: 1px solid rgba(224,199,157,.34);
+      background: rgba(15,13,11,.82);
+      box-shadow: 0 20px 60px rgba(0,0,0,.4);
+    }
+
+    #startTitle {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 25px;
+      letter-spacing: .06em;
+      margin: 0 0 9px;
+      font-weight: 400;
+    }
+
+    #startSub {
+      margin: 0 0 23px;
+      font-size: 15px;
+      line-height: 1.45;
+      color: rgba(241,234,223,.77);
+    }
+
+    #startButton {
+      appearance: none;
+      border: 1px solid #d2b27e;
+      background: #d2b27e;
+      color: #16120e;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      padding: 14px 20px;
+      min-width: 230px;
+      cursor: pointer;
+    }
+
+    #startButton:disabled { opacity: .55; cursor: default; }
+
+    #errorBox {
+      display: none;
+      margin-top: 16px;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #f0d7c7;
+    }
+
+    #hint {
+      position: fixed;
+      left: 50%;
+      bottom: max(18px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      z-index: 30;
+      padding: 8px 12px;
+      border-radius: 18px;
+      background: rgba(0,0,0,.52);
+      color: rgba(255,255,255,.88);
+      font-size: 13px;
+      line-height: 1.2;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 300ms ease;
+      pointer-events: none;
+    }
+
+    #hint.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <img id="portrait" src="./goethe_portrait.png" alt="">
+  <div id="hint">Наведите камеру на страницу с автографом Гёте</div>
+
+  <div id="startScreen">
+    <div id="startCard">
+      <h1 id="startTitle">И. В. ГЁТЕ</h1>
+      <p id="startSub">Дополненная реальность книги</p>
+      <button id="startButton" type="button">ОЖИВИТЬ КНИГУ</button>
+      <div id="errorBox"></div>
+    </div>
+  </div>
+
+  <a-scene
+    mindar-image="
+      imageTargetSrc: ./targets.mind;
+      autoStart: false;
+      maxTrack: 1;
+      uiLoading: yes;
+      uiScanning: no;
+      uiError: no;
+      warmupTolerance: 2;
+      missTolerance: 22;
+      filterMinCF: 0.0005;
+      filterBeta: 800;
+    "
+    color-space="sRGB"
+    renderer="colorManagement: true; alpha: true; antialias: true"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false">
+
+    <a-camera id="arCamera" position="0 0 0" look-controls="enabled: false"></a-camera>
+    <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
+  </a-scene>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const scene = document.querySelector('a-scene');
+      const target = document.getElementById('goetheTarget');
+      const cameraEl = document.getElementById('arCamera');
+      const portrait = document.getElementById('portrait');
+      const startScreen = document.getElementById('startScreen');
+      const startButton = document.getElementById('startButton');
+      const errorBox = document.getElementById('errorBox');
+      const hint = document.getElementById('hint');
+
+      let targetVisible = false;
+      let hideTimer = null;
+      let hintTimer = null;
+      let baselineDistance = null;
+      let smoothedScale = 1;
+      let samples = [];
+
+      const targetPos = new THREE.Vector3();
+      const cameraPos = new THREE.Vector3();
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+      function median(a) {
+        if (!a.length) return null;
+        const s = [...a].sort((x,y) => x-y);
+        const m = Math.floor(s.length / 2);
+        return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+      }
+
+      function distanceToTarget() {
+        if (!target.object3D || !cameraEl.object3D) return null;
+        target.object3D.getWorldPosition(targetPos);
+        cameraEl.object3D.getWorldPosition(cameraPos);
+        const d = targetPos.distanceTo(cameraPos);
+        return Number.isFinite(d) && d > 0.01 && d < 50 ? d : null;
+      }
+
+      function animateScale() {
+        if (targetVisible) {
+          const d = distanceToTarget();
+          if (d) {
+            if (!baselineDistance) {
+              samples.push(d);
+              if (samples.length >= 12) {
+                baselineDistance = median(samples);
+                samples = [];
+              }
+            } else {
+              const desired = clamp(baselineDistance / d, 0.72, 1.55);
+              const delta = desired - smoothedScale;
+              if (Math.abs(delta) > 0.018) {
+                smoothedScale += delta * 0.10;
+                portrait.style.setProperty('--s', smoothedScale.toFixed(4));
+              }
+            }
+          }
+        }
+        requestAnimationFrame(animateScale);
+      }
+
+      function showPortrait() {
+        targetVisible = true;
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = null;
+        samples = [];
+        baselineDistance = null;
+        portrait.classList.add('visible');
+        hint.classList.remove('show');
+      }
+
+      function scheduleHide() {
+        targetVisible = false;
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          portrait.classList.remove('visible');
+          baselineDistance = null;
+          samples = [];
+          smoothedScale = 1;
+          portrait.style.setProperty('--s', '1');
+          hint.classList.add('show');
+        }, 1400);
+      }
+
+      target.addEventListener('targetFound', showPortrait);
+      target.addEventListener('targetLost', scheduleHide);
+
+      function showError(msg) {
+        errorBox.style.display = 'block';
+        errorBox.textContent = msg;
+      }
+
+      startButton.addEventListener('click', async () => {
+        startButton.disabled = true;
+        startButton.textContent = 'ЗАПУСК КАМЕРЫ…';
+        errorBox.style.display = 'none';
+        try {
+          const mindarSystem = scene.systems['mindar-image-system'];
+          await mindarSystem.start();
+          startScreen.style.display = 'none';
+          hint.classList.add('show');
+          clearTimeout(hintTimer);
+          hintTimer = setTimeout(() => hint.classList.remove('show'), 5500);
+        } catch (e) {
+          console.error(e);
+          startButton.disabled = false;
+          startButton.textContent = 'ПОПРОБОВАТЬ СНОВА';
+          showError('Камера не запустилась. Разрешите доступ к камере для этого сайта в настройках браузера и повторите запуск.');
+        }
+      });
+
+      requestAnimationFrame(animateScale);
+    });
+  </script>
+</body>
+</html>
