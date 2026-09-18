@@ -1,46 +1,39 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-  <meta name="theme-color" content="#000000">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
   <title>Гёте — дополненная реальность</title>
 
   <script src="https://cdn.jsdelivr.net/npm/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    html, body {
-      margin: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: #000;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-    }
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: Georgia, "Times New Roman", serif; }
 
-    a-scene {
-      position: fixed !important;
-      inset: 0 !important;
-      z-index: 1;
-    }
+    a-scene { position: fixed !important; inset: 0 !important; z-index: 1; }
 
     #portrait {
-      --s: 1;
+      --ar-scale: 1;
       position: fixed;
       left: 50%;
       top: 49%;
-      width: min(68vw, 420px);
-      max-height: 78vh;
+      width: min(64vw, 430px);
+      max-height: 76vh;
       object-fit: contain;
-      transform: translate(-50%, -50%) scale(var(--s));
-      transform-origin: center center;
       opacity: 0;
-      z-index: 20;
       pointer-events: none;
-      transition: opacity 420ms ease;
+      z-index: 20;
+      transform-origin: 50% 50%;
+      transform: translate(-50%, -50%) scale(var(--ar-scale));
+      transition: opacity 280ms ease;
       will-change: transform, opacity;
-      filter: drop-shadow(0 10px 24px rgba(0,0,0,.26));
+      filter: drop-shadow(0 10px 24px rgba(0,0,0,.32));
+      user-select: none;
+      -webkit-user-drag: none;
     }
 
     #portrait.visible { opacity: 1; }
@@ -48,232 +41,262 @@
     #startScreen {
       position: fixed;
       inset: 0;
-      z-index: 50;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      box-sizing: border-box;
-      background: radial-gradient(circle at 50% 35%, #29231d 0%, #12100e 52%, #050505 100%);
-      color: #f1eadf;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(circle at 50% 35%, #23211e 0, #0a0a0a 54%, #000 100%);
+      padding: 28px;
       text-align: center;
     }
 
-    #startCard {
-      width: min(88vw, 430px);
-      padding: 28px 24px 24px;
-      border: 1px solid rgba(224,199,157,.34);
-      background: rgba(15,13,11,.82);
-      box-shadow: 0 20px 60px rgba(0,0,0,.4);
-    }
+    #startCard { max-width: 520px; }
+    #startCard h1 { margin: 0 0 14px; font-size: clamp(28px, 7vw, 44px); font-weight: 500; letter-spacing: .02em; }
+    #startCard p { margin: 0 0 22px; color: #d8d2c8; font: 18px/1.45 Arial, sans-serif; }
 
-    #startTitle {
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 25px;
-      letter-spacing: .06em;
-      margin: 0 0 9px;
-      font-weight: 400;
-    }
-
-    #startSub {
-      margin: 0 0 23px;
-      font-size: 15px;
-      line-height: 1.45;
-      color: rgba(241,234,223,.77);
-    }
-
-    #startButton {
+    #startBtn {
       appearance: none;
-      border: 1px solid #d2b27e;
-      background: #d2b27e;
-      color: #16120e;
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: .06em;
-      padding: 14px 20px;
-      min-width: 230px;
+      border: 1px solid rgba(255,255,255,.28);
+      border-radius: 999px;
+      padding: 15px 26px;
+      background: #f0ebe1;
+      color: #111;
+      font: 700 16px/1 Arial, sans-serif;
+      letter-spacing: .03em;
       cursor: pointer;
     }
+    #startBtn:disabled { opacity: .55; cursor: default; }
 
-    #startButton:disabled { opacity: .55; cursor: default; }
-
-    #errorBox {
-      display: none;
+    #status {
       margin-top: 16px;
-      font-size: 13px;
-      line-height: 1.45;
-      color: #f0d7c7;
+      min-height: 22px;
+      color: #c9c3b8;
+      font: 14px/1.35 Arial, sans-serif;
     }
 
     #hint {
       position: fixed;
       left: 50%;
       bottom: max(18px, env(safe-area-inset-bottom));
-      transform: translateX(-50%);
       z-index: 30;
-      padding: 8px 12px;
-      border-radius: 18px;
-      background: rgba(0,0,0,.52);
-      color: rgba(255,255,255,.88);
-      font-size: 13px;
-      line-height: 1.2;
-      white-space: nowrap;
+      transform: translateX(-50%);
+      max-width: calc(100vw - 36px);
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.48);
+      color: rgba(255,255,255,.9);
+      font: 13px/1.2 Arial, sans-serif;
+      backdrop-filter: blur(8px);
       opacity: 0;
-      transition: opacity 300ms ease;
+      transition: opacity 220ms ease;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #hint.show { opacity: 1; }
+
+    #debug {
+      display: none;
+      position: fixed;
+      top: max(10px, env(safe-area-inset-top));
+      left: 10px;
+      z-index: 200;
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: rgba(0,0,0,.65);
+      color: #fff;
+      font: 12px/1.25 monospace;
       pointer-events: none;
     }
-
-    #hint.show { opacity: 1; }
+    body.debug #debug { display: block; }
   </style>
 </head>
 <body>
-
-  <img id="portrait" src="./goethe_portrait.png" alt="">
-  <div id="hint">Наведите камеру на страницу с автографом Гёте</div>
+  <img id="portrait" src="./goethe_ar.png" alt="" />
 
   <div id="startScreen">
     <div id="startCard">
-      <h1 id="startTitle">И. В. ГЁТЕ</h1>
-      <p id="startSub">Дополненная реальность книги</p>
-      <button id="startButton" type="button">ОЖИВИТЬ КНИГУ</button>
-      <div id="errorBox"></div>
+      <h1>Гёте</h1>
+      <p>Нажмите кнопку и наведите камеру на страницу с автографом.</p>
+      <button id="startBtn" type="button">ОЖИВИТЬ КНИГУ</button>
+      <div id="status"></div>
     </div>
   </div>
 
+  <div id="hint">Наведите камеру на страницу с автографом Гёте</div>
+  <div id="debug">—</div>
+
   <a-scene
-    mindar-image="
-      imageTargetSrc: ./targets.mind;
-      autoStart: false;
-      maxTrack: 1;
-      uiLoading: yes;
-      uiScanning: no;
-      uiError: no;
-      warmupTolerance: 2;
-      missTolerance: 22;
-      filterMinCF: 0.0005;
-      filterBeta: 800;
-    "
+    id="scene"
+    mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no; warmupTolerance: 3; missTolerance: 18; filterMinCF: 0.0005; filterBeta: 800;"
     color-space="sRGB"
     renderer="colorManagement: true; alpha: true; antialias: true"
     vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: false">
+    device-orientation-permission-ui="enabled: false"
+    embedded>
 
-    <a-camera id="arCamera" position="0 0 0" look-controls="enabled: false"></a-camera>
-    <a-entity id="goetheTarget" mindar-image-target="targetIndex: 0"></a-entity>
+    <a-camera id="camera" position="0 0 0" look-controls="enabled: false"></a-camera>
+    <a-entity id="target" mindar-image-target="targetIndex: 0"></a-entity>
   </a-scene>
 
   <script>
-    window.addEventListener('DOMContentLoaded', () => {
-      const scene = document.querySelector('a-scene');
-      const target = document.getElementById('goetheTarget');
-      const cameraEl = document.getElementById('arCamera');
-      const portrait = document.getElementById('portrait');
-      const startScreen = document.getElementById('startScreen');
-      const startButton = document.getElementById('startButton');
-      const errorBox = document.getElementById('errorBox');
-      const hint = document.getElementById('hint');
+  (() => {
+    const portrait = document.getElementById('portrait');
+    const scene = document.getElementById('scene');
+    const target = document.getElementById('target');
+    const cameraEl = document.getElementById('camera');
+    const startScreen = document.getElementById('startScreen');
+    const startBtn = document.getElementById('startBtn');
+    const status = document.getElementById('status');
+    const hint = document.getElementById('hint');
+    const debug = document.getElementById('debug');
 
-      let targetVisible = false;
-      let hideTimer = null;
-      let hintTimer = null;
-      let baselineDistance = null;
-      let smoothedScale = 1;
-      let samples = [];
+    const qs = new URLSearchParams(location.search);
+    if (qs.get('debug') === '1') document.body.classList.add('debug');
 
-      const targetPos = new THREE.Vector3();
-      const cameraPos = new THREE.Vector3();
-      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    let found = false;
+    let hideTimer = null;
+    let baseMetric = null;
+    let samples = [];
+    let smoothScale = 1;
+    let lastApplied = 1;
+    let started = false;
 
-      function median(a) {
-        if (!a.length) return null;
-        const s = [...a].sort((x,y) => x-y);
-        const m = Math.floor(s.length / 2);
-        return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
-      }
+    const world0 = new THREE.Vector3();
+    const worldX = new THREE.Vector3();
+    const worldY = new THREE.Vector3();
+    const ndc0 = new THREE.Vector3();
+    const ndcX = new THREE.Vector3();
+    const ndcY = new THREE.Vector3();
+    const local0 = new THREE.Vector3(0, 0, 0);
+    const localX = new THREE.Vector3(1, 0, 0);
+    const localY = new THREE.Vector3(0, 1, 0);
 
-      function distanceToTarget() {
-        if (!target.object3D || !cameraEl.object3D) return null;
-        target.object3D.getWorldPosition(targetPos);
-        cameraEl.object3D.getWorldPosition(cameraPos);
-        const d = targetPos.distanceTo(cameraPos);
-        return Number.isFinite(d) && d > 0.01 && d < 50 ? d : null;
-      }
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-      function animateScale() {
-        if (targetVisible) {
-          const d = distanceToTarget();
-          if (d) {
-            if (!baselineDistance) {
-              samples.push(d);
-              if (samples.length >= 12) {
-                baselineDistance = median(samples);
-                samples = [];
-              }
-            } else {
-              const desired = clamp(baselineDistance / d, 0.72, 1.55);
-              const delta = desired - smoothedScale;
-              if (Math.abs(delta) > 0.018) {
-                smoothedScale += delta * 0.10;
-                portrait.style.setProperty('--s', smoothedScale.toFixed(4));
-              }
+    function median(a) {
+      if (!a.length) return null;
+      const s = a.slice().sort((x,y) => x-y);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+    }
+
+    // Измеряем ВИДИМЫЙ размер системы координат распознанной страницы
+    // прямо в пикселях экрана. Это меняется, когда телефон реально
+    // приближается/удаляется, но портрет сам остаётся вертикальным DOM-слоем.
+    function projectedTargetMetric() {
+      if (!target.object3D || !cameraEl.object3D || !cameraEl.getObject3D('camera')) return null;
+      const cam = cameraEl.getObject3D('camera');
+      target.object3D.updateMatrixWorld(true);
+      cam.updateMatrixWorld(true);
+
+      world0.copy(local0).applyMatrix4(target.object3D.matrixWorld);
+      worldX.copy(localX).applyMatrix4(target.object3D.matrixWorld);
+      worldY.copy(localY).applyMatrix4(target.object3D.matrixWorld);
+
+      ndc0.copy(world0).project(cam);
+      ndcX.copy(worldX).project(cam);
+      ndcY.copy(worldY).project(cam);
+
+      const w = innerWidth || 1;
+      const h = innerHeight || 1;
+      const xLen = Math.hypot((ndcX.x - ndc0.x) * w * 0.5, (ndcX.y - ndc0.y) * h * 0.5);
+      const yLen = Math.hypot((ndcY.x - ndc0.x) * w * 0.5, (ndcY.y - ndc0.y) * h * 0.5);
+
+      // max делает метрику менее чувствительной к наклону страницы вокруг одной оси.
+      const metric = Math.max(xLen, yLen);
+      return Number.isFinite(metric) && metric > 2 ? metric : null;
+    }
+
+    function resetCalibration() {
+      baseMetric = null;
+      samples = [];
+      smoothScale = 1;
+      lastApplied = 1;
+      portrait.style.setProperty('--ar-scale', '1');
+    }
+
+    function renderLoop() {
+      if (found) {
+        const metric = projectedTargetMetric();
+        if (metric) {
+          if (!baseMetric) {
+            samples.push(metric);
+            if (samples.length >= 18) {
+              baseMetric = median(samples);
+              samples = [];
+            }
+          } else {
+            // Телефон ближе -> метка больше -> портрет больше.
+            // Телефон дальше -> метка меньше -> портрет меньше.
+            let desired = clamp(metric / baseMetric, 0.62, 1.62);
+
+            // Мёртвая зона 2.5% убирает микродрожь трекинга.
+            if (Math.abs(desired - lastApplied) < 0.025) desired = lastApplied;
+
+            // EMA + ограничение шага: масштаб меняется плавно, без рывков.
+            const ema = smoothScale + (desired - smoothScale) * 0.13;
+            const maxStep = 0.018;
+            const delta = clamp(ema - smoothScale, -maxStep, maxStep);
+            smoothScale = clamp(smoothScale + delta, 0.62, 1.62);
+
+            // Не дёргаем DOM из-за тысячных долей.
+            if (Math.abs(smoothScale - lastApplied) >= 0.004) {
+              lastApplied = smoothScale;
+              portrait.style.setProperty('--ar-scale', smoothScale.toFixed(4));
+            }
+
+            if (document.body.classList.contains('debug')) {
+              debug.textContent = `metric ${metric.toFixed(1)} / base ${baseMetric.toFixed(1)}\nscale ${smoothScale.toFixed(3)}`;
             }
           }
         }
-        requestAnimationFrame(animateScale);
       }
+      requestAnimationFrame(renderLoop);
+    }
 
-      function showPortrait() {
-        targetVisible = true;
-        if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = null;
-        samples = [];
-        baselineDistance = null;
-        portrait.classList.add('visible');
-        hint.classList.remove('show');
-      }
-
-      function scheduleHide() {
-        targetVisible = false;
-        if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-          portrait.classList.remove('visible');
-          baselineDistance = null;
-          samples = [];
-          smoothedScale = 1;
-          portrait.style.setProperty('--s', '1');
-          hint.classList.add('show');
-        }, 1400);
-      }
-
-      target.addEventListener('targetFound', showPortrait);
-      target.addEventListener('targetLost', scheduleHide);
-
-      function showError(msg) {
-        errorBox.style.display = 'block';
-        errorBox.textContent = msg;
-      }
-
-      startButton.addEventListener('click', async () => {
-        startButton.disabled = true;
-        startButton.textContent = 'ЗАПУСК КАМЕРЫ…';
-        errorBox.style.display = 'none';
-        try {
-          const mindarSystem = scene.systems['mindar-image-system'];
-          await mindarSystem.start();
-          startScreen.style.display = 'none';
-          hint.classList.add('show');
-          clearTimeout(hintTimer);
-          hintTimer = setTimeout(() => hint.classList.remove('show'), 5500);
-        } catch (e) {
-          console.error(e);
-          startButton.disabled = false;
-          startButton.textContent = 'ПОПРОБОВАТЬ СНОВА';
-          showError('Камера не запустилась. Разрешите доступ к камере для этого сайта в настройках браузера и повторите запуск.');
-        }
-      });
-
-      requestAnimationFrame(animateScale);
+    target.addEventListener('targetFound', () => {
+      found = true;
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+      resetCalibration();
+      portrait.classList.add('visible');
+      hint.classList.remove('show');
     });
+
+    target.addEventListener('targetLost', () => {
+      found = false;
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        portrait.classList.remove('visible');
+        resetCalibration();
+        hint.classList.add('show');
+      }, 900);
+    });
+
+    async function startAR() {
+      if (started) return;
+      started = true;
+      startBtn.disabled = true;
+      status.textContent = 'Запускаю камеру…';
+
+      try {
+        if (!scene.hasLoaded) {
+          await new Promise(resolve => scene.addEventListener('loaded', resolve, { once: true }));
+        }
+        const system = scene.systems['mindar-image-system'];
+        if (!system) throw new Error('MindAR не загрузился');
+        await system.start();
+        startScreen.style.display = 'none';
+        hint.classList.add('show');
+      } catch (err) {
+        console.error(err);
+        started = false;
+        startBtn.disabled = false;
+        status.innerHTML = 'Камера не запустилась. Разрешите доступ к камере в настройках сайта и повторите.';
+      }
+    }
+
+    startBtn.addEventListener('click', startAR);
+    requestAnimationFrame(renderLoop);
+  })();
   </script>
 </body>
 </html>
